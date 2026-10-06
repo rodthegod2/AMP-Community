@@ -24,7 +24,7 @@ namespace AMP.GameInteraction {
             if(creatureData == null) { // If the client doesnt have the creature, just spawn a HumanMale or HumanFemale (happens when mod is not installed)
                 string creatureId = new System.Random().Next(0, 2) == 1 ? "HumanMale" : "HumanFemale";
 
-                Log.Err(Defines.CLIENT, $"Couldn't find playermodel for {pnd.name} ({creatureData.id}), please check you mods. Instead {creatureId} is used now.");
+                Log.Err(Defines.CLIENT, $"Couldn't find playermodel for {pnd.name} ({pnd.creatureId}), please check you mods. Instead {creatureId} is used now.");
                 creatureData = Catalog.GetData<CreatureData>(creatureId);
             }
             if(creatureData != null) {
@@ -148,7 +148,7 @@ namespace AMP.GameInteraction {
             if(creatureData == null) { // If the client doesnt have the creature, just spawn a HumanMale or HumanFemale (happens when mod is not installed)
                 string creatureId = new System.Random().Next(0, 2) == 1 ? "HumanMale" : "HumanFemale";
 
-                Log.Err(Defines.CLIENT, $"Couldn't spawn enemy {creatureData.id}, please check you mods. Instead {creatureId} is used now.");
+                Log.Err(Defines.CLIENT, $"Couldn't spawn enemy {creatureSync.creatureType}, please check you mods. Instead {creatureId} is used now.");
                 creatureData = Catalog.GetData<CreatureData>(creatureId);
             }
 
