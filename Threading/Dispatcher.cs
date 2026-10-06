@@ -1,20 +1,21 @@
 ﻿using AMP.Logging;
 using System;
 using System.Collections.Concurrent;
-#if FULL_DEBUG
 using System.Diagnostics;
-#endif
 
 namespace AMP.Threading {
     public class Dispatcher {
 
 		private static readonly ConcurrentQueue<Action> executionQueue = new ConcurrentQueue<Action>();
 
+		// Max time per frame spent on queued actions, so a burst of packets cannot stall a VR frame
+		private const long TICK_BUDGET_MS = 10;
+
 		public static void UpdateTick() {
-			int ms = DateTime.UtcNow.Millisecond;
+			Stopwatch stopwatch = Stopwatch.StartNew();
 			Action action;
 			lock(executionQueue) {
-				while((DateTime.UtcNow.Millisecond - 50 < ms /*|| executionQueue.Count > 20*/) && executionQueue.TryDequeue(out action)) {
+				while(stopwatch.ElapsedMilliseconds < TICK_BUDGET_MS && executionQueue.TryDequeue(out action)) {
 					if (action != null) {
 						try {
 							action.Invoke();
@@ -26,7 +27,7 @@ namespace AMP.Threading {
 			}
 
             #if FULL_DEBUG
-			Log.Debug($"Tick took {DateTime.UtcNow.Millisecond - ms}ms");
+			Log.Debug($"Tick took {stopwatch.ElapsedMilliseconds}ms");
 			#endif
         }
 
