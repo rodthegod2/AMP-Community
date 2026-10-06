@@ -35,7 +35,7 @@ namespace AMP.Network.Packets.Implementation {
 
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             if(ModManager.serverInstance.creatures.ContainsKey(creatureId)) {
-                if(ModManager.serverInstance.creature_owner[creatureId] != client.ClientId) return true;
+                if(!ModManager.serverInstance.creature_owner.TryGetValue(creatureId, out int creatureOwnerId) || creatureOwnerId != client.ClientId) return true;
 
                 server.SendToAllExcept(this, client.ClientId);
             }

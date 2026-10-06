@@ -51,7 +51,7 @@ namespace AMP.Network.Packets.Implementation {
                 // then change the npc to that players authority
                 //Log.Warn(Math.Abs(change) + " > " + (cnd.maxHealth * Config.REQUIRED_DAMAGE_FOR_CREATURE_TRANSFER));
                 if(Math.Abs(change) > cnd.maxHealth * Config.REQUIRED_DAMAGE_FOR_CREATURE_TRANSFER) {
-                    if(ModManager.serverInstance.creature_owner[creatureId] != client.ClientId) {
+                    if(!ModManager.serverInstance.creature_owner.TryGetValue(creatureId, out int creatureOwnerId) || creatureOwnerId != client.ClientId) {
                         ModManager.serverInstance.UpdateCreatureOwner(cnd, client);
                     }
                 }
