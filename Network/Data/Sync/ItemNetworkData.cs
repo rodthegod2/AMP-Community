@@ -234,7 +234,7 @@ namespace AMP.Network.Data.Sync {
                 // Check that all hands that grab are registered as grabbing
                 int index = 0;
                 foreach(Handle handle in clientsideItem.handles) {
-                    bool isHeld = holdingStates.Where(s => s.holdingIndex == index).ToArray().Length > 0;
+                    bool isHeld = holdingStates.Where(s => s.holdingIndex == index + 1).ToArray().Length > 0;
 
                     if(!isHeld) {
                         handle?.Release();
