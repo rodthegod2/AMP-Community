@@ -19,10 +19,10 @@ namespace AMP.Security {
             if(modlist.Length == 0) return new string[0];
             
             if(!whitelist.Contains("Adammantium's Multiplayer Mod")) { // Make sure we are not blocking the multiplayer mod itself, that would be a pretty stupid reason to kick someone ^^
-                whitelist.Append("Adammantium's Multiplayer Mod");
+                whitelist = whitelist.Append("Adammantium's Multiplayer Mod").ToArray();
             }
             if(!whitelist.Contains("AMP")) {                           // Make sure we are not blocking the multiplayer mod itself, that would be a pretty stupid reason to kick someone ^^
-                whitelist.Append("AMP");
+                whitelist = whitelist.Append("AMP").ToArray();
             }
             
             MatchList matchList = GetModMatchlist(whitelist, modlist);
