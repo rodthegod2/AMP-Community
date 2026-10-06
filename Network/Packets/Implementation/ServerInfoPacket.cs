@@ -51,7 +51,7 @@ namespace AMP.Network.Packets.Implementation {
                 });
             }
 
-            Config.BASE_TICK_RATE = base_tickrate;
+            Config.BASE_TICK_RATE = Mathf.Clamp(base_tickrate, 1, 60); // 0 would divide by zero in the sync loops
 
             DiscordIntegration.Instance.UpdateActivity();
             return true;
