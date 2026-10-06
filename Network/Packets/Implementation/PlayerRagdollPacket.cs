@@ -102,7 +102,7 @@ namespace AMP.Network.Packets.Implementation {
                     float estimatedPlayerRot = rotationY;
 
                     estimatedPlayerPos = NetworkData.Compensate(estimatedPlayerPos, velocity, compensationFactor);
-                    estimatedPlayerRot = NetworkData.Compensate(estimatedPlayerRot, rotationYVel, compensationFactor);
+                    estimatedPlayerRot = NetworkData.Compensate(estimatedPlayerRot, rotationYVel * Mathf.Rad2Deg, compensationFactor);
                     for(int i = 0; i < estimatedRagdollPos.Length; i++) {
                         estimatedRagdollPos[i] = NetworkData.Compensate(estimatedRagdollPos[i], velocities[i], compensationFactor);
                     }
