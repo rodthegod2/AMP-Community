@@ -53,8 +53,10 @@ namespace AMP.Network.Packets.Implementation {
                             if(caster.mana.mergeInstance != null) {
 
                                 EffectInstance chargeEffect = caster.mana.mergeInstance.GetFieldValue<EffectInstance>("chargeEffect");
-                                chargeEffect?.End();
-                                chargeEffect.SetParent(null);
+                                if(chargeEffect != null) {
+                                    chargeEffect.End();
+                                    chargeEffect.SetParent(null);
+                                }
 
                                 caster.mana.mergeInstance = null;
                             }
