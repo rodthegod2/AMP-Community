@@ -21,7 +21,7 @@ namespace AMP.Data {
 
         #region Subclasses
         public class ModSettings {
-            public bool useBrowserIntegration   = true;
+            public bool useBrowserIntegration   = false;
             public bool useAdvancedNpcSyncing   = true;
             public bool useSpaceWarMode         = false;
             public float minPredictionTreshhold = 0.15f;

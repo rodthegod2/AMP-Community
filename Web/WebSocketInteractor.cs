@@ -17,6 +17,7 @@ using System.Threading;
 
 namespace AMP.Web {
     public class WebSocketInteractor {
+        private const ulong MAX_MESSAGE_LENGTH = 4096; // join requests are tiny
         private static bool running = true;
         private static Thread runningThread;
 
@@ -114,6 +115,8 @@ namespace AMP.Web {
 
                     if(msglen == 0) {
                         Console.WriteLine("msglen == 0");
+                    } else if(msglen > MAX_MESSAGE_LENGTH || (ulong) offset + 4 + msglen > (ulong) bytes.Length) {
+                        Log.Err(Defines.WEB_INTERFACE, "invalid or oversized frame, ignoring");
                     } else if(mask) {
                         byte[] decoded = new byte[msglen];
                         byte[] masks = new byte[4] { bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3] };
@@ -140,6 +143,7 @@ namespace AMP.Web {
                 Log.Debug(Defines.WEB_INTERFACE, "Connection with browser has been closed");
             } else if(text.StartsWith("join:")) {
                 string[] splits = text.Split(':');
+                if(splits.Length < 3) return "ERROR|Invalid join request.";
 
                 Log.Debug(Defines.WEB_INTERFACE, "Requested joining " + splits[1] + ":" + splits[2]);
 
@@ -159,7 +163,7 @@ namespace AMP.Web {
                 ModManager.guiManager.join_ip = splits[1];
                 ModManager.guiManager.join_port = splits[2];
                 if(splits.Length > 3) {
-                    ModManager.guiManager.join_password = splits[3];
+                    ModManager.guiManager.join_password = string.Join(":", splits, 3, splits.Length - 3); // passwords may contain ":"
                 } else {
                     ModManager.guiManager.join_password = "";
                 }
