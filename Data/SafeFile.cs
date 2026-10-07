@@ -43,6 +43,11 @@ namespace AMP.Data {
             public byte   baseTickRate          = 10;
             public byte   playerTickRate        = 30;
 
+            // NPC authority: the host keeps every NPC it owns unless somebody explicitly grabs it
+            public bool   hostAuthoritativeNpcs = false;
+            // Minimum seconds between two damage-triggered NPC owner changes (0 = off)
+            public float  ownerHoldSeconds      = 1.5f;
+
             public bool useModWhitelist         = false;
             public string[] modWhitelist        = new string[0];
             public bool useModBlacklist         = false;

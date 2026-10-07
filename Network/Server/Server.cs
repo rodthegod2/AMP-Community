@@ -11,6 +11,7 @@ using Netamite.Server.Definition;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,6 +43,7 @@ namespace AMP.Network.Server {
         }
         public ConcurrentDictionary<int, CreatureNetworkData> creatures = new ConcurrentDictionary<int, CreatureNetworkData>();
         internal ConcurrentDictionary<int, int> creature_owner = new ConcurrentDictionary<int, int>();
+        private ConcurrentDictionary<int, long> creature_owner_changed = new ConcurrentDictionary<int, long>(); // Stopwatch timestamp of the last transfer
 
         private int currentEntityId = 1;
         public int CurrentEntityId {
@@ -225,11 +227,32 @@ namespace AMP.Network.Server {
             }
         }
 
+        private bool IsCreatureOwnerChangeAllowed(CreatureNetworkData creatureNetworkData, ClientData newOwner, int oldOwnerId, bool grabRequest) {
+            SafeFile.HostingSettings settings = ModManager.safeFile.hostingSettings;
+            Client.Client hostClient = ModManager.clientInstance;
+            int hostId = hostClient != null && hostClient.netclient != null ? hostClient.netclient.ClientId : 0;
+
+            double secondsSinceLastTransfer = double.PositiveInfinity;
+            if(creature_owner_changed.TryGetValue(creatureNetworkData.networkedId, out long changedAt)) {
+                secondsSinceLastTransfer = (Stopwatch.GetTimestamp() - changedAt) / (double) Stopwatch.Frequency;
+            }
+
+            return OwnershipPolicy.IsTransferAllowed(oldOwnerId, newOwner.ClientId, creatureNetworkData.staticOwner,
+                                                     oldOwnerId <= 0 || netamiteServer.GetClientById(oldOwnerId) != null,
+                                                     settings.hostAuthoritativeNpcs, hostId, grabRequest,
+                                                     secondsSinceLastTransfer, settings.ownerHoldSeconds);
+        }
+
         public void UpdateCreatureOwner(CreatureNetworkData creatureNetworkData, ClientData newOwner, bool staticOwner = false) {
             creature_owner.TryGetValue(creatureNetworkData.networkedId, out int oldOwnerId);
 
-            // Prevent a change of owner if the creature is assigned a static owner
-            if (creatureNetworkData.staticOwner && oldOwnerId != 0 && newOwner.ClientId != oldOwnerId) return;
+            if(!IsCreatureOwnerChangeAllowed(creatureNetworkData, newOwner, oldOwnerId, staticOwner)) {
+                // The requester assumes ownership right away, so tell it that it was refused
+                netamiteServer.SendTo(newOwner, new CreatureOwnerPacket(creatureNetworkData.networkedId, false, creatureNetworkData.staticOwner));
+                return;
+            }
+
+            if(oldOwnerId > 0 && oldOwnerId != newOwner.ClientId) creature_owner_changed[creatureNetworkData.networkedId] = Stopwatch.GetTimestamp();
 
             creature_owner[creatureNetworkData.networkedId] = newOwner.ClientId;
             
@@ -259,6 +282,7 @@ namespace AMP.Network.Server {
         internal void ClearItemsAndCreatures() {
             lock(creatures) { creatures.Clear(); }
             lock(creature_owner) { creature_owner.Clear(); }
+            creature_owner_changed.Clear();
             lock(items) { items.Clear(); }
             lock(item_owner) { item_owner.Clear(); }
         }

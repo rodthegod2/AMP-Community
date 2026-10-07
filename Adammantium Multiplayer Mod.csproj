@@ -255,6 +255,7 @@
     <Compile Include="Network\Packets\Implementation\NametagVisibilityPacket.cs" />
     <Compile Include="Network\Packets\Implementation\SizeChangePacket.cs" />
     <Compile Include="Network\Packets\PacketType.cs" />
+    <Compile Include="Network\Server\OwnershipPolicy.cs" />
     <Compile Include="Network\Server\Server.cs" />
     <Compile Include="Network\Helper\SyncFunc.cs" />
     <Compile Include="Network\Server\ServerFunc.cs" />
