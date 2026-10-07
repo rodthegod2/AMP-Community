@@ -61,8 +61,20 @@ namespace AMP.Network.Packets.Implementation {
             return true;
         }
 
+        private const float MAX_CHANGE   = 1000f; // far above anything a weapon does, but finite
+        private const float MAX_PUSHBACK = 200f;
+
+        private static bool IsValid(float value) {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             if(!ModManager.safeFile.hostingSettings.pvpEnable) return true;
+
+            // A client must not be able to forward NaN, infinite or absurd values to another player
+            if(!IsValid(change) || !IsValid(pushbackForce.x) || !IsValid(pushbackForce.y) || !IsValid(pushbackForce.z)) return true;
+            change        = Mathf.Clamp(change, -MAX_CHANGE, MAX_CHANGE);
+            pushbackForce = Vector3.ClampMagnitude(pushbackForce, MAX_PUSHBACK);
 
             if(client.GetDamageMultiplicator() <= 0) return true;
 
