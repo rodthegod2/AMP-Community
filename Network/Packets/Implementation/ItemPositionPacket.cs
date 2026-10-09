@@ -67,6 +67,9 @@ namespace AMP.Network.Packets.Implementation {
 
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             if(ModManager.serverInstance.items.ContainsKey(itemId)) {
+                // Drop late updates from a previous holder, otherwise everyone sees the item jitter between two players
+                if(!ModManager.serverInstance.item_owner.TryGetValue(itemId, out int itemOwnerId) || itemOwnerId != client.ClientId) return true;
+
                 ItemNetworkData ind = ModManager.serverInstance.items[itemId];
 
                 ind.Apply(this);
