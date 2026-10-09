@@ -20,13 +20,21 @@ namespace AMP.ModSync {
             if(!Directory.Exists(modsPath)) return result;
 
             HashCache cache = HashCache.Load(Path.Combine(cacheDir, HashCacheFile));
-            foreach(string dir in Directory.GetDirectories(modsPath).OrderBy(d => d, StringComparer.OrdinalIgnoreCase)) {
-                ModEntry entry = ReadEntry(dir);
-                if(entry == null) continue;
-                if(hashAll || entry.isAmp) entry.hash = HashFolder(dir, cache);
-                result.Add(entry);
+            try {
+                foreach(string dir in Directory.GetDirectories(modsPath).OrderBy(d => d, StringComparer.OrdinalIgnoreCase)) {
+                    try {
+                        string[] files = Directory.GetFiles(dir, "*", SearchOption.AllDirectories);
+                        ModEntry entry = ReadEntry(dir, files);
+                        if(entry == null) continue;
+                        if(hashAll || entry.isAmp) entry.hash = HashFolder(dir, files, cache);
+                        result.Add(entry);
+                    } catch(Exception e) when (e is IOException || e is UnauthorizedAccessException) {
+                        // a folder that vanished or can't be read is skipped, never hashed partially
+                    }
+                }
+            } finally {
+                cache.Save();
             }
-            cache.Save();
             return result;
         }
 
@@ -41,7 +49,7 @@ namespace AMP.ModSync {
             }
         }
 
-        internal static ModEntry ReadEntry(string dir) {
+        internal static ModEntry ReadEntry(string dir, string[] files) {
             string manifestPath = Path.Combine(dir, "manifest.json");
             if(!File.Exists(manifestPath)) return null; // the game doesn't load folders without a manifest either
 
@@ -50,10 +58,11 @@ namespace AMP.ModSync {
                 manifest = JObject.Parse(File.ReadAllText(manifestPath));
             } catch(JsonException) {
                 return null;
+            } catch(ArgumentException) {
+                return null; // older Newtonsoft throws this on duplicate keys
             }
 
             string folder = Path.GetFileName(dir);
-            string[] files = Directory.GetFiles(dir, "*", SearchOption.AllDirectories);
             return new ModEntry {
                 folder    = folder,
                 name      = Str(manifest, "Name", folder),
@@ -76,21 +85,24 @@ namespace AMP.ModSync {
             if(long.TryParse(text, out id)) return id;
             try {
                 JToken token = JObject.Parse(text)["id"];
-                return token == null ? 0 : token.Value<long>();
+                return token != null && token.Type == JTokenType.Integer ? token.Value<long>() : 0;
             } catch(JsonException) {
                 return 0;
+            } catch(ArgumentException) {
+                return 0;
             } catch(FormatException) {
+                return 0;
+            } catch(OverflowException) {
                 return 0;
             }
         }
 
-        internal static string HashFolder(string dir, HashCache cache) {
+        internal static string HashFolder(string dir, string[] files, HashCache cache) {
             var lines = new StringBuilder();
-            var files = Directory.GetFiles(dir, "*", SearchOption.AllDirectories)
-                                 .Where(f => !HashIgnoredFiles.Contains(Path.GetFileName(f), StringComparer.OrdinalIgnoreCase))
-                                 .Select(f => new KeyValuePair<string, string>(RelativePath(dir, f), f))
-                                 .OrderBy(f => f.Key, StringComparer.Ordinal);
-            foreach(var file in files) {
+            var ordered = files.Where(f => !HashIgnoredFiles.Contains(Path.GetFileName(f), StringComparer.OrdinalIgnoreCase))
+                               .Select(f => new KeyValuePair<string, string>(RelativePath(dir, f), f))
+                               .OrderBy(f => f.Key, StringComparer.Ordinal);
+            foreach(var file in ordered) {
                 lines.Append(file.Key).Append('\0').Append(cache.FileHash(file.Value)).Append('\n');
             }
             return HashCache.Hex(SHA256Bytes(Encoding.UTF8.GetBytes(lines.ToString())));
@@ -110,7 +122,8 @@ namespace AMP.ModSync {
         }
     }
 
-    // Remembers file hashes by path, size and modification time, so rescanning gigabytes of mods is fast
+    // Remembers file hashes by path, size and modification time, so rescanning gigabytes of mods is fast.
+    // Only files seen by the latest scan are kept, so the cache doesn't grow with deleted mods.
     internal class HashCache {
         internal class Item {
             public long   size;
@@ -120,6 +133,7 @@ namespace AMP.ModSync {
 
         private readonly string path;
         private readonly Dictionary<string, Item> items;
+        private readonly HashSet<string> visited = new HashSet<string>();
         private bool dirty;
 
         private HashCache(string path, Dictionary<string, Item> items) {
@@ -131,17 +145,19 @@ namespace AMP.ModSync {
             Dictionary<string, Item> items = null;
             try {
                 if(File.Exists(path)) items = JsonConvert.DeserializeObject<Dictionary<string, Item>>(File.ReadAllText(path));
-            } catch(JsonException) { } catch(IOException) { }
+            } catch(JsonException) { } catch(IOException) { } catch(UnauthorizedAccessException) { }
             return new HashCache(path, items ?? new Dictionary<string, Item>());
         }
 
         internal string FileHash(string file) {
+            visited.Add(file);
             var info = new FileInfo(file);
             Item item;
             if(items.TryGetValue(file, out item) && item.size == info.Length && item.ticks == info.LastWriteTimeUtc.Ticks) return item.sha;
 
             string sha;
-            using(FileStream stream = File.OpenRead(file))
+            // Share read/write/delete so files the game or a mod tool has open can still be hashed
+            using(var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 16))
             using(SHA256 hasher = SHA256.Create()) {
                 sha = Hex(hasher.ComputeHash(stream));
             }
@@ -151,10 +167,12 @@ namespace AMP.ModSync {
         }
 
         internal void Save() {
+            Dictionary<string, Item> kept = items.Where(kv => visited.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+            if(kept.Count != items.Count) dirty = true;
             if(!dirty) return;
             try {
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
-                File.WriteAllText(path, JsonConvert.SerializeObject(items));
+                File.WriteAllText(path, JsonConvert.SerializeObject(kept));
                 dirty = false;
             } catch(IOException) { } catch(UnauthorizedAccessException) { } // only a speed-up, losing it is fine
         }

@@ -32,6 +32,8 @@ internal static class Program {
             Directory.CreateDirectory(Path.Combine(f.Mods, "NoManifest"));
             string amp = f.Mod("MultiplayerMod", "AMP");
             f.File_(amp, "AMP.dll", "amp build 1");
+            string nullId = f.Mod("NullId");
+            File.WriteAllText(Path.Combine(nullId, "id.modio"), "{\"id\":null}");
 
             var mods = ModInventory.Scan(f.Mods, f.Cache, true);
             var byFolder = mods.ToDictionary(m => m.folder);
@@ -41,6 +43,7 @@ internal static class Program {
             T("mod.io id from json id.modio", byFolder["ModB"].modioId == 5966899);
             T("mod.io id from legacy id.modio", byFolder["Legacy"].modioId == 123456);
             T("no id.modio means id 0", byFolder["ModA"].modioId == 0);
+            T("null id in id.modio means id 0", byFolder["NullId"].modioId == 0);
             T("dll means hasCode", byFolder["ModB"].hasCode && !byFolder["ModA"].hasCode);
             T("underscore folder is disabled", !byFolder["_Disabled"].enabled && byFolder["ModA"].enabled);
             T("AMP folder is recognised", byFolder["MultiplayerMod"].isAmp && !byFolder["ModA"].isAmp);
@@ -62,6 +65,19 @@ internal static class Program {
             T("missing loadorder.json gives empty order", ModInventory.ReadLoadOrder(f.Mods).Length == 0);
             File.WriteAllText(Path.Combine(f.Mods, "loadorder.json"), "{\"modNames\":[\"ModB\",\"ModA\"]}");
             T("loadorder.json is read", ModInventory.ReadLoadOrder(f.Mods).SequenceEqual(new[] { "ModB", "ModA" }));
+
+            string held = f.Mod("Held");
+            f.File_(held, "Items/held.json", "held");
+            using(var writer = new FileStream(Path.Combine(held, "Items", "held.json"), FileMode.Open, FileAccess.Write, FileShare.ReadWrite)) {
+                ModEntry heldMod = ModInventory.Scan(f.Mods, f.Cache, true).FirstOrDefault(m => m.folder == "Held");
+                T("file open for writing by another handle still hashes", heldMod != null && heldMod.hash.Length == 64);
+            }
+
+            string cachePath = Path.Combine(f.Cache, "hashcache.json");
+            T("hash cache holds a folder before it is deleted", File.ReadAllText(cachePath).Contains("Legacy"));
+            Directory.Delete(legacy, true);
+            ModInventory.Scan(f.Mods, f.Cache, true);
+            T("deleted mod folder is dropped from the hash cache", !File.ReadAllText(cachePath).Contains("Legacy"));
         }
     }
 
@@ -126,6 +142,17 @@ internal static class Program {
 
         string text = missing.Describe();
         T("summary names the mod and size", text.Contains("B") && text.Contains("1 MB"));
+
+        var disabledAmp = P(Host("windows", M("A"), M("MultiplayerMod", hash: "x", amp: true)), "windows",
+                            M("_MultiplayerMod_old", hash: "y", amp: true, enabled: false), M("A"), M("MultiplayerMod", hash: "x", amp: true));
+        T("disabled AMP copies don't count as the AMP build", !disabledAmp.ampDiffers);
+
+        var replaced = P(Host("windows", M("A", hash: "1", modio: 5)), "windows", M("A", hash: "2", modio: 5));
+        T("same-platform replace downloads from the host, not mod.io", replaced.Of(SyncAction.Replace).Single().source == "host");
+
+        var nullHost = Host("windows", M("A"));
+        nullHost.mods.Add(null);
+        T("null entries in host and local lists are ignored", P(nullHost, "windows", M("A"), null).steps.Count == 0);
     }
 
     private static void ChunkTests() {
@@ -144,5 +171,30 @@ internal static class Program {
         T("out-of-order parts reassemble", assembler.Add("k", 0, 3, parts[0]) == big);
         T("separate keys don't mix", assembler.Add("a", 0, 2, "1") == null && assembler.Add("b", 0, 1, "solo") == "solo" && assembler.Add("a", 1, 2, "2") == "12");
         T("nonsense part numbers are ignored", assembler.Add("bad", 5, 2, "x") == null && assembler.Add("bad", 0, 0, "x") == null);
+
+        // Bounded memory: 16 pending messages (oldest evicted), 2 minute expiry, at most 133 parts
+        var now = new DateTime(2026, 10, 9, 12, 0, 0, DateTimeKind.Utc);
+        var crowded = new MessageAssembler(() => now);
+        for(int i = 1; i <= 17; i++) {
+            crowded.Add(i.ToString(), 0, 2, "a");
+            now = now.AddSeconds(1);
+        }
+        T("17th pending message evicts the oldest", crowded.Add("17", 1, 2, "b") == "ab" && crowded.Add("1", 1, 2, "b") == null);
+
+        var aging = new MessageAssembler(() => now);
+        aging.Add("old", 0, 2, "a");
+        now = now.AddMinutes(3);
+        T("pending message older than 2 minutes is dropped", aging.Add("old", 1, 2, "b") == null && aging.Add("old", 0, 2, "a") == "ab");
+
+        var forget = new MessageAssembler();
+        forget.Add("1:5", 0, 2, "a");
+        forget.Add("2:5", 0, 2, "a");
+        forget.Forget("1:");
+        T("Forget removes only the matching prefix", forget.Add("1:5", 1, 2, "b") == null && forget.Add("2:5", 1, 2, "b") == "ab");
+
+        string overlong = null;
+        var capped = new MessageAssembler();
+        for(int i = 0; i < 200; i++) overlong = capped.Add("big", i, 200, "x");
+        T("messages over 133 parts are rejected", overlong == null);
     }
 }

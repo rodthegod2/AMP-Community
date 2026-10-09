@@ -60,10 +60,12 @@ namespace AMP.ModSync {
             var personal = new HashSet<string>(host.personalMods ?? new string[0], StringComparer.OrdinalIgnoreCase);
             Func<ModEntry, bool> leftAlone = m => m.isAmp || personal.Contains(m.folder);
 
-            List<ModEntry> mine = local.Where(m => m.enabled && !leftAlone(m)).ToList();
+            // Both lists come from other players' JSON, so null entries are skipped rather than crashing the join
+            List<ModEntry> hostMods = (host.mods ?? new List<ModEntry>()).Where(m => m != null).ToList();
+            List<ModEntry> mine = local.Where(m => m != null && m.enabled && !leftAlone(m)).ToList();
             var matched = new HashSet<ModEntry>();
 
-            foreach(ModEntry hostMod in (host.mods ?? new List<ModEntry>()).Where(m => m.enabled && !leftAlone(m))) {
+            foreach(ModEntry hostMod in hostMods.Where(m => m.enabled && !leftAlone(m))) {
                 ModEntry localMod = mine.FirstOrDefault(m => !matched.Contains(m) && SameMod(hostMod, m, samePlatform));
                 string source = hostMod.modioId > 0 ? "modio" : (samePlatform ? "host" : "");
 
@@ -75,7 +77,8 @@ namespace AMP.ModSync {
 
                 // Builds differ between platforms, so versions are only compared on the same platform
                 if(samePlatform && !string.IsNullOrEmpty(hostMod.hash) && !string.IsNullOrEmpty(localMod.hash) && hostMod.hash != localMod.hash) {
-                    plan.steps.Add(new SyncStep { action = SyncAction.Replace, hostMod = hostMod, localMod = localMod, source = source });
+                    // mod.io only serves its latest version, which may not be the host's, so replacements always come from the host
+                    plan.steps.Add(new SyncStep { action = SyncAction.Replace, hostMod = hostMod, localMod = localMod, source = "host" });
                 }
             }
 
@@ -85,8 +88,9 @@ namespace AMP.ModSync {
 
             plan.loadOrderDiffers = samePlatform && !SameOrder(host.loadOrder, localLoadOrder, personal);
 
-            ModEntry hostAmp  = (host.mods ?? new List<ModEntry>()).FirstOrDefault(m => m.isAmp);
-            ModEntry localAmp = local.FirstOrDefault(m => m.isAmp);
+            // A disabled AMP copy (folder starting with "_") is not the one that loads, so it doesn't count
+            ModEntry hostAmp  = hostMods.FirstOrDefault(m => m.isAmp && m.enabled);
+            ModEntry localAmp = local.FirstOrDefault(m => m != null && m.isAmp && m.enabled);
             string hostBuild  = !string.IsNullOrEmpty(host.ampBuild) ? host.ampBuild : (hostAmp != null ? hostAmp.hash : "");
             plan.ampDiffers   = !string.IsNullOrEmpty(hostBuild) && (localAmp == null || localAmp.hash != hostBuild);
             return plan;
