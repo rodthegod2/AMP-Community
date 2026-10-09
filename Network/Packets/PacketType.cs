@@ -49,6 +49,7 @@
 
         MAGIC_SET                   = 100,
         MAGIC_CHARGE,
+        MAGIC_THROW,
 
         MOD_LIST                    = 110,
         

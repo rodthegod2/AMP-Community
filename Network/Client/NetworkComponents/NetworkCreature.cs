@@ -512,13 +512,25 @@ namespace AMP.Network.Client.NetworkComponents {
 
             public CastingInfo(Creature c, Side side, string magicId, int casterId, ItemHolderType casterType) {
                 this.caster = c.GetHand(side).caster;
-                if(this.caster.spellInstance != null) {
-                    charge = (SpellCastCharge) this.caster.spellInstance;
+                this.side = side;
+                charge = this.caster.spellInstance as SpellCastCharge;
+                if(charge != null) {
                     currentCharge = charge.currentCharge;
+                    charge.OnSpellThrowEvent += OnThrow;
                 }
                 this.magicId = magicId;
                 this.casterId = casterId;
                 this.casterType = casterType;
+            }
+
+            private readonly Side side;
+
+            private void OnThrow(SpellCastCharge spell, Vector3 velocity) {
+                new MagicThrowPacket((byte) side, casterId, casterType, spell.currentCharge, velocity).SendToServerReliable();
+            }
+
+            public void Detach() {
+                if(charge != null) charge.OnSpellThrowEvent -= OnThrow;
             }
         }
 
@@ -538,11 +550,8 @@ namespace AMP.Network.Client.NetworkComponents {
             if(SyncFunc.GetCreature(creature, out casterType, out casterNetworkId)) {
                 //Log.Debug("Spell: " + creature.name + " " + side + " " + spellId);
 
-                if(currentActiveSpells.ContainsKey(side)) {
-                    currentActiveSpells[side] = new CastingInfo(creature, side, spellId, casterNetworkId, casterType);
-                } else {
-                    currentActiveSpells.Add(side, new CastingInfo(creature, side, spellId, casterNetworkId, casterType));
-                }
+                if(currentActiveSpells.TryGetValue(side, out CastingInfo previous)) previous.Detach();
+                currentActiveSpells[side] = new CastingInfo(creature, side, spellId, casterNetworkId, casterType);
 
                 new MagicSetPacket(spellId, (byte) side, casterNetworkId, casterType).SendToServerReliable();
             }
@@ -554,6 +563,7 @@ namespace AMP.Network.Client.NetworkComponents {
 
             if(currentActiveSpells.ContainsKey(side)) {
                 CastingInfo castingInfo = currentActiveSpells[side];
+                castingInfo.Detach();
                 casterType = castingInfo.casterType;
                 casterNetworkId = castingInfo.casterId;
                 currentActiveSpells.Remove(side);
@@ -583,9 +593,9 @@ namespace AMP.Network.Client.NetworkComponents {
                         Dispatcher.Enqueue(() => {
                             OnSpellStopped(entry.Key);
                         });
-                    } else {
+                    } else if(entry.Value.charge != null) {
                         if(entry.Value.currentCharge != entry.Value.charge.currentCharge) { // Charge changed
-                            new MagicChargePacket((byte) entry.Key, entry.Value.casterId, entry.Value.casterType, entry.Value.currentCharge, entry.Value.caster.GetShootDirection()).SendToServerUnreliable();
+                            new MagicChargePacket((byte) entry.Key, entry.Value.casterId, entry.Value.casterType, entry.Value.charge.currentCharge, entry.Value.caster.GetShootDirection()).SendToServerUnreliable();
 
                             entry.Value.currentCharge = entry.Value.charge.currentCharge;
                         }
