@@ -13,6 +13,8 @@ namespace AMP.Network.Packets.Implementation {
     public class ModSyncPacket : AMPPacket {
         public const byte HOST_MOD_SET  = 1;
         public const byte JOINER_REPORT = 2;
+        public const byte SETTINGS_SNAPSHOT = 3; // host -> joiner, all server-side values, sent when the joiner is greeted
+        public const byte SETTING_CHANGED   = 4; // host -> joiners, one value the host just changed
 
         [SyncedVar] public byte   kind;
         [SyncedVar] public int    transferId;
@@ -41,7 +43,8 @@ namespace AMP.Network.Packets.Implementation {
         }
 
         public override bool ProcessClient(NetamiteClient client) {
-            ModSyncClient.OnPacket(this);
+            if(kind == SETTINGS_SNAPSHOT || kind == SETTING_CHANGED) SettingsSyncClient.OnPacket(this);
+            else ModSyncClient.OnPacket(this);
             return true;
         }
 

@@ -183,6 +183,8 @@ namespace AMP.Network.Server {
             
             client.greeted = true;
             client.LoadedLevel = true;
+
+            ModSync.SettingsSyncHost.SendSnapshot(client);
         }
 
         /// <summary>

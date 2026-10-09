@@ -9,8 +9,11 @@ namespace AMP.ModSync {
             return ThunderRoad.ModManager.loadedMods.Where(m => m != null && m.modOptions != null);
         }
 
+        // ThunderRoad collects the options before it loads their values and applies them (ApplyModOptions),
+        // so "loaded" means every option of every mod has its values
         internal static bool OptionsLoaded() {
-            return LoadedMods().Any(m => m.modOptions.Count > 0);
+            return LoadedMods().Any(m => m.modOptions.Count > 0)
+                && LoadedMods().All(m => m.modOptions.All(o => o == null || o.origParameterValues != null));
         }
 
         internal static bool IsAmp(ThunderRoad.ModManager.ModData mod) {

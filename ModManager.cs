@@ -108,6 +108,7 @@ namespace AMP {
             } catch(Exception e) {
                 Log.Err(Defines.AMP, "Mod sync unavailable: " + e.Message);
             }
+            StartCoroutine(ModSync.SettingsSyncClient.StartupRoutine());
             if(safeFile.modSettings.useBrowserIntegration) {
                 WebSocketInteractor.Start();
             }
@@ -301,6 +302,7 @@ namespace AMP {
             StopClient();
             StopHost();
             ModSync.ModSyncHost.Prepare();
+            ModSync.SettingsSyncHost.Start();
 
             IPServer server = new IPServer("0.0.0.0", (short) port, (int) maxPlayers);
             server.ConnectToken = password;
@@ -325,6 +327,7 @@ namespace AMP {
             StopClient();
             StopHost();
             ModSync.ModSyncHost.Prepare();
+            ModSync.SettingsSyncHost.Start();
 
             SteamServer steamServer = new SteamServer((int) maxPlayers);
 
@@ -372,6 +375,8 @@ namespace AMP {
             LevelFunc.DisableRespawning();
             LevelFunc.SetBookAvailability(true, true);
 
+            ModSync.SettingsSyncClient.Restore();
+
             clientInstance?.Disconnect();
             clientSync?.Stop();
             if(clientSync != null) Destroy(clientSync);
@@ -388,6 +393,7 @@ namespace AMP {
 
         public static void StopHost() {
             if(serverInstance == null) return;
+            ModSync.SettingsSyncHost.Stop();
             serverInstance.Stop();
             serverInstance = null;
         }
