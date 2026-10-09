@@ -1,4 +1,5 @@
 ﻿using System;
+using AMP.Data;
 using AMP.GameInteraction;
 using AMP.Logging;
 using AMP.UI;
@@ -157,6 +158,51 @@ namespace AMP {
                     vr.Stop();
                 }
             }
+        }
+
+
+        // Server settings for games you host. Joiners see the host's values here, live and locked (settings sync).
+        [ModOptionCategory(ModSync.SettingsRules.AmpHostCategory, 20)]
+        [ModOptionOrder(30)]
+        [ModOptionTooltip("Players can hurt each other on servers you host.")]
+        [ModOption("PvP", saveValue = true)]
+        public static void SetPvp(bool enabled = true) {
+            ChangeHostSetting(s => s.pvpEnable = enabled);
+        }
+
+        [ModOptionCategory(ModSync.SettingsRules.AmpHostCategory, 20)]
+        [ModOptionOrder(31)]
+        [ModOptionTooltip("How much damage players do to each other, in percent.")]
+        [ModOption("PvP Damage %", saveValue = true)]
+        [ModOptionIntValues(0, 200, 10)]
+        public static void SetPvpDamage(int percent = 20) {
+            ChangeHostSetting(s => s.pvpDamageMultiplier = percent / 100f);
+        }
+
+        [ModOptionCategory(ModSync.SettingsRules.AmpHostCategory, 20)]
+        [ModOptionOrder(32)]
+        [ModOptionTooltip("Other players may load a different map.")]
+        [ModOption("Players Change Map", saveValue = true)]
+        public static void SetAllowMapChange(bool allowed = true) {
+            ChangeHostSetting(s => s.allowMapChange = allowed);
+        }
+
+        [ModOptionCategory(ModSync.SettingsRules.AmpHostCategory, 20)]
+        [ModOptionOrder(33)]
+        [ModOptionTooltip("Only the host runs enemy AI. Steadier fights, more load on the host.")]
+        [ModOption("Host Runs Enemies", saveValue = true)]
+        public static void SetHostAuthoritativeNpcs(bool enabled = false) {
+            ChangeHostSetting(s => s.hostAuthoritativeNpcs = enabled);
+        }
+
+        // Mod Options can be applied before the config is loaded; SettingsSyncClient reconciles both once it is
+        internal static bool hostSettingsReconciled = false;
+
+        private static void ChangeHostSetting(Action<SafeFile.HostingSettings> change) {
+            if(ModManager.safeFile == null) return;
+            change(ModManager.safeFile.hostingSettings);
+            // Values pushed by a host we joined must not end up in our own config file
+            if(hostSettingsReconciled && !ModSync.SettingsSyncClient.ApplyingHostValues) ModManager.safeFile.Save();
         }
 
 

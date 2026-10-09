@@ -1,6 +1,7 @@
 ﻿using AMP.Logging;
 using Newtonsoft.Json;
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace AMP.Data {
@@ -57,6 +58,10 @@ namespace AMP.Data {
             public string   modSyncMode            = "warn";
             // Mods joiners may keep, lack or have in another version; AMP itself always counts as personal
             public string[] personalMods           = new string[] { "HJ_NexusModManager" };
+            // Joiners use the host's gameplay Mod Options while connected (see ModSync/SettingsRules.cs)
+            public bool     syncModSettings        = true;
+            // Force an option to be synced or not: { "<mod folder>/<option name>": "server" | "personal" }
+            public Dictionary<string, string> settingOverrides = new Dictionary<string, string>();
 
             
             public bool useModWhitelist            = false;

@@ -1,0 +1,59 @@
+using System.Collections.Generic;
+using System.Linq;
+using ThunderRoad;
+
+namespace AMP.ModSync {
+    // The only place that touches ThunderRoad's ModOption objects. Main thread only.
+    internal static class ModOptionBridge {
+        internal static IEnumerable<ThunderRoad.ModManager.ModData> LoadedMods() {
+            return ThunderRoad.ModManager.loadedMods.Where(m => m != null && m.modOptions != null);
+        }
+
+        internal static bool OptionsLoaded() {
+            return LoadedMods().Any(m => m.modOptions.Count > 0);
+        }
+
+        internal static bool IsAmp(ThunderRoad.ModManager.ModData mod) {
+            return mod.assemblies != null && mod.assemblies.Any(a => a != null && a.GetName().Name == "AMP");
+        }
+
+        internal static ModOption Find(string modFolder, string optionName) {
+            ThunderRoad.ModManager.ModData mod = LoadedMods().FirstOrDefault(m => m.folderName == modFolder);
+            return mod == null ? null : mod.modOptions.FirstOrDefault(o => o != null && o.name == optionName);
+        }
+
+        internal static string[] Titles(ModOption option) {
+            if(option.parameterValues == null) return new string[0];
+            return option.parameterValues.Select(p => p == null ? "" : (p.title ?? (p.value == null ? "" : p.value.ToString()))).ToArray();
+        }
+
+        // Index of the parameter holding this value (e.g. true, 20), or -1
+        internal static int IndexOfValue(ModOption option, object value) {
+            if(option.parameterValues == null) return -1;
+            for(int i = 0; i < option.parameterValues.Length; i++) {
+                ModOptionParameter parameter = option.parameterValues[i];
+                if(parameter != null && value.Equals(parameter.value)) return i;
+            }
+            return -1;
+        }
+
+        internal static OptionValue Read(ModOption option) {
+            int index = option.GetIndex(false);
+            string[] titles = Titles(option);
+            return new OptionValue {
+                mod    = option.modData.folderName,
+                option = option.name,
+                index  = index,
+                title  = index >= 0 && index < titles.Length ? titles[index] : "",
+            };
+        }
+
+        // Sets the value like the menu would and makes an open menu show it
+        internal static void Apply(ModOption option, int index) {
+            option.Apply(index);
+            UIList list = option.uiComponent as UIList;
+            if(list != null) list.LoadValue(false);
+            option.RefreshUI();
+        }
+    }
+}
