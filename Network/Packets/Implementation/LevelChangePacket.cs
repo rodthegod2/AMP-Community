@@ -128,7 +128,7 @@ namespace AMP.Network.Packets.Implementation {
                     // Dont send that stuff if we dont have the seed yet
                     if(LevelInfo.SameOptions(ModManager.serverInstance.currentOptions, option_dict, true)) {
                         foreach(ClientData c in ModManager.serverInstance.Clients) {
-                            client.LoadedLevel = false;
+                            c.LoadedLevel = false; // every player has to load the new level
                             if(c.ClientId == client.ClientId) continue;
                             c.ShowText("level_change", $"{client.ClientName} is loading <color=#0099FF>{level}</color>.\n<color=#FF0000>Please stay in your level.</color>", Color.yellow, 240);
                         }

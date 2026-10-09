@@ -165,8 +165,15 @@ namespace AMP.Network.Server {
             Log.Info(Defines.SERVER, $"Player {client.ClientName} ({client.ClientId}) joined the server.");
             Log.Info(Defines.SERVER, $"{netamiteServer.ConnectedClients} / {netamiteServer.MaxClients} Players currently connected: { string.Join(", ", netamiteServer._clients.Select(x => x.Value.ClientName).ToArray()) }");
             
+            // On a server hosted from inside the game, the host's own client is the lobby admin so they can kick and ban
+            if(ModManager.clientInstance?.netclient != null && ModManager.clientInstance.netclient.ClientId == client.ClientId
+               && client.permissionLevel < Datatypes.PermissionLevel.LOBBY_ADMIN) {
+                client.permissionLevel = Datatypes.PermissionLevel.LOBBY_ADMIN;
+                Log.Info(Defines.SERVER, $"Host {client.ClientName} is lobby admin.");
+            }
+
             CheckAutoModerator();
-            
+
             ServerEvents.InvokeOnPlayerJoin(client);
             
             ModManager.serverInstance.netamiteServer.InitializeTimeSync(client);

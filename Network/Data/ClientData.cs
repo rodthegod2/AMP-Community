@@ -172,9 +172,8 @@ namespace AMP.Network.Data {
 
         #region Kick and Ban
         public void Kick(string reason) {
-            Log.Err(Defines.SERVER, $"{ClientName} kicked: {reason}");
-            ModManager.serverInstance.netamiteServer.ClientLeft(this, reason);
-            ModManager.serverInstance.LeavePlayer(this, reason);
+            Log.Info(Defines.SERVER, $"{ClientName} kicked: {reason}");
+            ModManager.serverInstance.netamiteServer.ClientLeft(this, reason); // raises OnDisconnect, which already runs LeavePlayer
         }
         
         // Bans a player for the duration of this session
