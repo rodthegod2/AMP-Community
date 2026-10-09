@@ -74,6 +74,8 @@ internal static class Program {
             }
 
             string cachePath = Path.Combine(f.Cache, "hashcache.json");
+            ModInventory.Scan(f.Mods, f.Cache, false);
+            T("partial scan keeps non-AMP entries in the hash cache", File.ReadAllText(cachePath).Contains("ModB.dll"));
             T("hash cache holds a folder before it is deleted", File.ReadAllText(cachePath).Contains("Legacy"));
             Directory.Delete(legacy, true);
             ModInventory.Scan(f.Mods, f.Cache, true);

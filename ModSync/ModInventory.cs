@@ -33,7 +33,7 @@ namespace AMP.ModSync {
                     }
                 }
             } finally {
-                cache.Save();
+                cache.Save(hashAll);
             }
             return result;
         }
@@ -123,7 +123,7 @@ namespace AMP.ModSync {
     }
 
     // Remembers file hashes by path, size and modification time, so rescanning gigabytes of mods is fast.
-    // Only files seen by the latest scan are kept, so the cache doesn't grow with deleted mods.
+    // After a full scan only files seen by it are kept, so the cache doesn't grow with deleted mods.
     internal class HashCache {
         internal class Item {
             public long   size;
@@ -166,8 +166,11 @@ namespace AMP.ModSync {
             return sha;
         }
 
-        internal void Save() {
-            Dictionary<string, Item> kept = items.Where(kv => visited.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+        // Only a scan that hashed every mod knows which entries are stale; a partial scan keeps the others
+        internal void Save(bool pruneUnvisited) {
+            Dictionary<string, Item> kept = pruneUnvisited
+                ? items.Where(kv => visited.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value)
+                : items;
             if(kept.Count != items.Count) dirty = true;
             if(!dirty) return;
             try {
