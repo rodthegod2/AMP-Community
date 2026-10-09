@@ -260,6 +260,7 @@ namespace AMP {
         internal static void JoinServer(NetamiteClient netClient, string password = "") {
             // Stop the old client right away, a queued stop would run after the new client is set up and kill it instead
             if(clientInstance != null) StopClientImmediatly();
+            ModSync.ModSyncClient.Reset();
 
             if(instance.gameObject.GetComponent<ClientSync>() != null) {
                 Destroy(instance.gameObject.GetComponent<ClientSync>());

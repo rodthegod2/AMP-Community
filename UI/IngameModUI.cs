@@ -1207,8 +1207,7 @@ namespace AMP.UI {
                 #if AMP
                 ModSync.ModSyncClient.JoinAnyway();
                 #endif
-                ShowPage(Page.Connecting);
-                connectingMessage.text = "Joining...";
+                UpdateConnectionScreen();
             });
             text = CreateObject("Text");
             text.transform.SetParent(btn.transform, false);
@@ -1703,6 +1702,12 @@ namespace AMP.UI {
                 UpdateFriendsPlaying();
                 #endif
                 
+                // The player still has to decide about the host's mods, the book must not hide that page
+                if(ModSync.ModSyncClient.AwaitingDecision) {
+                    ShowModSync(ModSync.ModSyncClient.Plan.Describe(), ModSync.ModSyncClient.HostSet.mode != ModSync.ModSyncMode.Enforce);
+                    return;
+                }
+
                 ShowPage(Page.Disconnect);
                 return;
             }

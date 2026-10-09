@@ -91,7 +91,8 @@ namespace AMP.Network.Packets.Implementation {
 
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             if(!client.greeted) {
-                if(eventTime == EventTime.OnEnd) {
+                // A joiner that hasn't passed the mod sync gate must not skip it by loading a level
+                if(eventTime == EventTime.OnEnd && ModSync.ModSyncHost.MayGreetOnLevelLoad(client)) {
                     ModManager.serverInstance.GreetPlayer(client, true);
                     ServerEvents.InvokeOnPlayerSpawned(client);
                 }
