@@ -201,7 +201,9 @@ namespace AMP.Network.Server {
             }
 
             if (!hasModerator) {
-                ClientData client = ((ClientData)netamiteServer.Clients[0]);
+                // Joiners still going through mod sync don't count as players yet
+                ClientData client = netamiteServer.Clients.Cast<ClientData>().FirstOrDefault(c => ModSync.ModSyncHost.IsPlaying(c));
+                if (client == null) return;
                 client.permissionLevel = Datatypes.PermissionLevel.LOBBY_ADMIN;
                 Log.Info(Defines.SERVER, $"Player {client.ClientName} has been automatically promoted to lobby admin.");
             }
@@ -329,7 +331,7 @@ namespace AMP.Network.Server {
                 Log.Info(Defines.SERVER, $"Clearing server because last player disconnected.");
             } else {
                 try {
-                    ClientInformation migrateUser = netamiteServer.Clients.First(entry => entry.ClientId != client.ClientId);
+                    ClientInformation migrateUser = netamiteServer.Clients.First(entry => entry.ClientId != client.ClientId && ModSync.ModSyncHost.IsPlaying((ClientData) entry));
                     try {
                         KeyValuePair<int, int>[] entries = item_owner.Where(entry => entry.Value == client.ClientId).ToArray();
 

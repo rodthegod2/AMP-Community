@@ -9,6 +9,7 @@ namespace AMP.ModSync {
     }
 
     public static class JoinerStatus {
+        public const string Checking   = "checking"; // got the host's list, still comparing (a first scan of many mods can take minutes)
         public const string Ready      = "ready";
         public const string NeedsSetup = "needs_setup";
         public const string Declined   = "declined";

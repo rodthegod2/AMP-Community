@@ -64,6 +64,7 @@ namespace AMP.ModSync {
             List<ModEntry> hostMods = (host.mods ?? new List<ModEntry>()).Where(m => m != null).ToList();
             List<ModEntry> mine = local.Where(m => m != null && m.enabled && !leftAlone(m)).ToList();
             var matched = new HashSet<ModEntry>();
+            var shared  = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // folders both sides have enabled (AMP and personal mods excluded)
 
             foreach(ModEntry hostMod in hostMods.Where(m => m.enabled && !leftAlone(m))) {
                 ModEntry localMod = mine.FirstOrDefault(m => !matched.Contains(m) && SameMod(hostMod, m, samePlatform));
@@ -74,6 +75,7 @@ namespace AMP.ModSync {
                     continue;
                 }
                 matched.Add(localMod);
+                shared.Add(hostMod.folder);
 
                 // Builds differ between platforms, so versions are only compared on the same platform
                 if(samePlatform && !string.IsNullOrEmpty(hostMod.hash) && !string.IsNullOrEmpty(localMod.hash) && hostMod.hash != localMod.hash) {
@@ -86,7 +88,7 @@ namespace AMP.ModSync {
                 plan.steps.Add(new SyncStep { action = SyncAction.Disable, localMod = localMod });
             }
 
-            plan.loadOrderDiffers = samePlatform && !SameOrder(host.loadOrder, localLoadOrder, personal);
+            plan.loadOrderDiffers = samePlatform && !SameOrder(host.loadOrder, localLoadOrder, shared);
 
             // A disabled AMP copy (folder starting with "_") is not the one that loads, so it doesn't count
             ModEntry hostAmp  = hostMods.FirstOrDefault(m => m.isAmp && m.enabled);
@@ -107,9 +109,13 @@ namespace AMP.ModSync {
             return new string((text ?? "").Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
         }
 
-        private static bool SameOrder(string[] host, string[] local, HashSet<string> personal) {
-            string[] a = (host ?? new string[0]).Where(n => !personal.Contains(n)).ToArray();
-            string[] b = (local ?? new string[0]).Where(n => !personal.Contains(n)).ToArray();
+        // Only the relative order of mods both sides have counts. A side without a loadorder.json has no opinion.
+        private static bool SameOrder(string[] host, string[] local, HashSet<string> shared) {
+            if(host == null || local == null || host.Length == 0 || local.Length == 0) return true;
+            var inHost  = new HashSet<string>(host,  StringComparer.OrdinalIgnoreCase);
+            var inLocal = new HashSet<string>(local, StringComparer.OrdinalIgnoreCase);
+            string[] a = host.Where(n => shared.Contains(n) && inLocal.Contains(n)).ToArray();
+            string[] b = local.Where(n => shared.Contains(n) && inHost.Contains(n)).ToArray();
             return a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
         }
     }

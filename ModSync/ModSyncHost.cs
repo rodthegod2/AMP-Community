@@ -15,10 +15,12 @@ namespace AMP.ModSync {
     internal static class ModSyncHost {
         private const int REPORT_TIMEOUT_MS = 60 * 1000;      // a joiner without mod sync never answers
         private const int SETUP_TIMEOUT_MS  = 30 * 60 * 1000; // time a joiner gets to look at / set up mods
+        private const int CHECK_TIMEOUT_MS  = 15 * 60 * 1000; // time a joiner gets to scan its mods
         internal const int MAX_REPORT_PARTS = 10;             // a joiner's report is tiny, anything longer is not one
 
         // ClientData.modSyncState; every change goes through Transition so concurrent packets and timers can't both win
         private const string WAITING = "waiting";
+        private const string CHECKING = "checking";
         private const string SETUP   = "setup";
         private const string READY   = "ready";
         private const string KICKED  = "kicked";
@@ -85,8 +87,8 @@ namespace AMP.ModSync {
                         server.netamiteServer.SendTo(client, packet);
                     }
                 } catch(Exception e) {
+                    // The timeout below still decides what happens to this joiner
                     Log.Err(Defines.SERVER, "Mod sync: couldn't send the mod list to " + client.ClientName + ". " + e.Message);
-                    return;
                 }
                 Task.Delay(REPORT_TIMEOUT_MS).ContinueWith(_ => OnReportTimeout(server, client, connectMode));
             });
@@ -97,8 +99,8 @@ namespace AMP.ModSync {
             assembler.Forget(client.ClientId + ":");
         }
 
-        // The client may only be greeted by its level load when it was never gated (mod sync off) or has passed the gate
-        internal static bool MayGreetOnLevelLoad(ClientData client) {
+        // A joiner still going through mod sync is connected but not playing yet: no item/NPC migration, no lobby admin
+        internal static bool IsPlaying(ClientData client) {
             lock(client.modSyncLock) {
                 return client.modSyncState == "" || client.modSyncState == READY;
             }
@@ -120,11 +122,14 @@ namespace AMP.ModSync {
 
             ServerType server = ModManager.serverInstance;
             if(report.status == JoinerStatus.Ready) {
-                if(Greet(server, client, WAITING, SETUP) && !string.IsNullOrEmpty(report.detail)) {
+                if(Greet(server, client, WAITING, CHECKING, SETUP) && !string.IsNullOrEmpty(report.detail)) {
                     Log.Info(Defines.SERVER, $"Mod sync: {client.ClientName} joins with differences: {report.detail}");
                 }
+            } else if(report.status == JoinerStatus.Checking) {
+                if(!Transition(client, CHECKING, WAITING)) return;
+                Task.Delay(CHECK_TIMEOUT_MS).ContinueWith(_ => OnCheckTimeout(server, client, mode));
             } else if(report.status == JoinerStatus.NeedsSetup) {
-                if(!Transition(client, SETUP, WAITING)) return;
+                if(!Transition(client, SETUP, WAITING, CHECKING)) return;
                 Log.Info(Defines.SERVER, $"Mod sync: {client.ClientName} ({report.platform}) needs to set up mods:\n{report.detail}");
                 Task.Delay(SETUP_TIMEOUT_MS).ContinueWith(_ => {
                     if(IsConnected(server, client) && Transition(client, KICKED, SETUP)) client.Kick("Mod setup took too long.");
@@ -139,6 +144,15 @@ namespace AMP.ModSync {
                 if(Transition(client, KICKED, WAITING)) client.Kick("This server checks mods on join. Update AMP to join.");
             } else if(Greet(server, client, WAITING)) {
                 Log.Info(Defines.SERVER, $"Mod sync: {client.ClientName} didn't answer (older AMP?), joining without mod check.");
+            }
+        }
+
+        private static void OnCheckTimeout(ServerType server, ClientData client, string checkMode) {
+            if(!IsConnected(server, client)) return;
+            if(checkMode == ModSyncMode.Enforce) {
+                if(Transition(client, KICKED, CHECKING)) client.Kick("Checking mods took too long.");
+            } else if(Greet(server, client, CHECKING)) {
+                Log.Info(Defines.SERVER, $"Mod sync: {client.ClientName} took too long to check its mods, joining without mod check.");
             }
         }
 

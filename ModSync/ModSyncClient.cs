@@ -58,6 +58,12 @@ namespace AMP.ModSync {
             }
             if(set == null) return;
 
+            // Tells the host not to give up on us while a big first scan runs, and the player why nothing happens yet
+            Report(client, JoinerStatus.Checking, "");
+            Dispatcher.Enqueue(() => {
+                if(ModManager.clientInstance == client && !HostHasGreeted()) ShowNotice("Checking your mods...");
+            });
+
             string modsFolder  = ModSyncPaths.ModsFolder;
             string cacheFolder = ModSyncPaths.CacheFolder;
             string platform    = ModSyncPaths.Platform;
@@ -79,6 +85,7 @@ namespace AMP.ModSync {
 
         private static void Handle(ClientType client, HostModSet set, SyncPlan plan) {
             if(ModManager.clientInstance != client) return; // left or switched servers while the scan was running
+            if(HostHasGreeted()) return;                    // the host gave up waiting and let us in, nothing left to decide
 
             HostSet = set;
             Plan    = plan;
@@ -114,6 +121,12 @@ namespace AMP.ModSync {
             awaitingClient = null;
             Report(client, JoinerStatus.Declined, "");
             ModManager.StopClient();
+        }
+
+        // ServerInfoPacket is the first thing of the host's greeting
+        private static bool HostHasGreeted() {
+            var sync = ModManager.clientSync;
+            return sync != null && sync.syncData.server_config != null;
         }
 
         // Only sends while the connection it was made for is still the active one

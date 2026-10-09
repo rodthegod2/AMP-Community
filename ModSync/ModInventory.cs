@@ -11,7 +11,8 @@ namespace AMP.ModSync {
     // Reads a Mods folder the same way the game decides what a mod is: a folder with a manifest.json.
     public static class ModInventory {
         // Rewritten on every mod.io update check, so it must not change a mod's hash
-        private static readonly string[] HashIgnoredFiles = { "id.modio" };
+        // Plus OS folder metadata and logs, which appear and change without the mod changing
+        private static readonly string[] HashIgnoredFiles = { "id.modio", "Thumbs.db", "desktop.ini", ".DS_Store" };
         private const string HashCacheFile = "hashcache.json";
 
         // hashAll = false skips hashing (cross-platform joiners can't compare hashes); AMP itself is always hashed
@@ -103,7 +104,8 @@ namespace AMP.ModSync {
 
         internal static string HashFolder(string dir, string[] files, HashCache cache) {
             var lines = new StringBuilder();
-            var ordered = files.Where(f => !HashIgnoredFiles.Contains(Path.GetFileName(f), StringComparer.OrdinalIgnoreCase))
+            var ordered = files.Where(f => !HashIgnoredFiles.Contains(Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+                                        && !f.EndsWith(".log", StringComparison.OrdinalIgnoreCase))
                                .Select(f => new KeyValuePair<string, string>(RelativePath(dir, f), f))
                                .OrderBy(f => f.Key, StringComparer.Ordinal);
             foreach(var file in ordered) {

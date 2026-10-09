@@ -81,6 +81,16 @@ internal static class Program {
             ModInventory.Scan(f.Mods, f.Cache, true);
             T("deleted mod folder is dropped from the hash cache", !File.ReadAllText(cachePath).Contains("Legacy"));
 
+            string junkHash = ModInventory.Scan(f.Mods, f.Cache, true).First(m => m.folder == "ModA").hash;
+            f.File_(a, "Thumbs.db", "thumbs");
+            f.File_(a, "Items/desktop.ini", "[.ShellClassInfo]");
+            f.File_(a, "Items/.DS_Store", "mac");
+            f.File_(a, "output_log.log", "log line");
+            f.File_(a, "Deep/er/THUMBS.DB", "upper case");
+            T("Thumbs.db, desktop.ini, .DS_Store and .log files don't change the hash", ModInventory.Scan(f.Mods, f.Cache, true).First(m => m.folder == "ModA").hash == junkHash);
+            f.File_(a, "Items/notes.txt", "real file");
+            T("a normal new file still changes the hash", ModInventory.Scan(f.Mods, f.Cache, true).First(m => m.folder == "ModA").hash != junkHash);
+
             string huge = f.Mod("HugeId");
             File.WriteAllText(Path.Combine(huge, "id.modio"), "{\"id\":123456789012345678901234567890}");
             ModEntry hugeMod = null;
@@ -152,6 +162,28 @@ internal static class Program {
         orderHost.loadOrder = new[] { "B", "A" };
         T("load order difference is detected", SyncPlanner.Plan(orderHost, new[] { M("A"), M("B") }.ToList(), new[] { "A", "B" }, "windows").loadOrderDiffers);
         T("load order is ignored across platforms", !SyncPlanner.Plan(orderHost, new[] { M("A", hash: ""), M("B", hash: "") }.ToList(), new[] { "A", "B" }, "android").loadOrderDiffers);
+
+        // Load order: only mods both sides have enabled count, in each side's own order
+        Func<string[], string[], ModEntry[], ModEntry[], bool> orderDiffers = (hostOrder, localOrder, hostMods, localMods) => {
+            var h = Host("windows", hostMods);
+            h.loadOrder = hostOrder;
+            return SyncPlanner.Plan(h, localMods.ToList(), localOrder, "windows").loadOrderDiffers;
+        };
+        T("load order: no loadorder.json on the joiner means no difference",
+            !orderDiffers(new[] { "B", "A" }, new string[0], new[] { M("A"), M("B") }, new[] { M("A"), M("B") }));
+        T("load order: no loadorder.json on the host means no difference",
+            !orderDiffers(new string[0], new[] { "B", "A" }, new[] { M("A"), M("B") }, new[] { M("A"), M("B") }));
+        T("load order: unrelated extra names don't matter",
+            !orderDiffers(new[] { "A", "HostOnly", "B" }, new[] { "LocalOnly", "A", "B", "Other" }, new[] { M("A"), M("B"), M("HostOnly") }, new[] { M("A"), M("B"), M("LocalOnly") }));
+        T("load order: swapped shared mods differ",
+            orderDiffers(new[] { "A", "X", "B" }, new[] { "B", "A" }, new[] { M("A"), M("B"), M("X") }, new[] { M("A"), M("B") }));
+        T("load order: AMP in different positions doesn't matter",
+            !orderDiffers(new[] { "MultiplayerMod", "A", "B" }, new[] { "A", "B", "MultiplayerMod" },
+                          new[] { M("A"), M("B"), M("MultiplayerMod", amp: true) }, new[] { M("A"), M("B"), M("MultiplayerMod", amp: true) }));
+        T("load order: personal mods in different positions don't matter",
+            !orderDiffers(new[] { "Tool", "A", "B" }, new[] { "A", "Tool", "B" }, new[] { M("A"), M("B"), M("Tool") }, new[] { M("A"), M("B"), M("Tool") }));
+        T("load order: a mod missing from one side's file is not compared",
+            !orderDiffers(new[] { "A", "B", "C" }, new[] { "B", "C" }, new[] { M("A"), M("B"), M("C") }, new[] { M("A"), M("B"), M("C") }));
 
         string text = missing.Describe();
         T("summary names the mod and size", text.Contains("B") && text.Contains("1 MB"));
