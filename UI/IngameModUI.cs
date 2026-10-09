@@ -60,6 +60,9 @@ namespace AMP.UI {
         private TextMeshProUGUI inviteFriendName;
 #endif
         RectTransform disconnectPanel;
+        RectTransform modSyncPanel;
+        TextMeshProUGUI modSyncText;
+        GameObject modSyncJoinAnyway;
         TextMeshProUGUI serverJoinCodeLabel;
         TextMeshProUGUI serverJoinCodeMessage;
         TextMeshProUGUI serverInfoMessage;
@@ -122,6 +125,7 @@ namespace AMP.UI {
             Disconnect = 5,
             Connecting = 6,
             Moderation = 7,
+            ModSync = 8,
             
             WARNING = 10
         }
@@ -1159,6 +1163,89 @@ namespace AMP.UI {
             rect.localPosition = new Vector3(0, 130, 0);
             #endregion
 
+            #region ModSync
+            gobj = CreateObject("ModSyncPanel");
+            gobj.transform.SetParent(transform);
+            modSyncPanel = gobj.AddComponent<RectTransform>();
+
+            gobj = CreateObject("ModSyncTitle");
+            gobj.transform.SetParent(modSyncPanel);
+            textMesh = gobj.AddComponent<TextMeshProUGUI>();
+            textMesh.text = "Your mods don't match the host's";
+            textMesh.fontSize = 55;
+            textMesh.fontStyle = FontStyles.Bold;
+            textMesh.color = Color.black;
+            textMesh.alignment = TextAlignmentOptions.Center;
+            rect = gobj.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(1000, 80);
+            rect.localPosition = new Vector3(0, 330, 0);
+
+            gobj = CreateObject("ModSyncText");
+            gobj.transform.SetParent(modSyncPanel);
+            modSyncText = gobj.AddComponent<TextMeshProUGUI>();
+            modSyncText.fontSize = 34;
+            modSyncText.enableAutoSizing = true;
+            modSyncText.fontSizeMin = 18;
+            modSyncText.fontSizeMax = 34;
+            modSyncText.color = Color.black;
+            modSyncText.alignment = TextAlignmentOptions.TopLeft;
+            rect = gobj.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(1000, 480);
+            rect.localPosition = new Vector3(0, 30, 0);
+
+            gobj = CreateObject("ModSyncJoinAnyway");
+            gobj.transform.SetParent(modSyncPanel);
+            modSyncJoinAnyway = gobj;
+            rect = gobj.AddComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(450, 130);
+            rect.localPosition = new Vector3(-245, -300, 0);
+            btn = gobj.AddComponent<Button>();
+            btn.targetGraphic = gobj.AddComponent<Image>();
+            btn.targetGraphic.color = new Color(1, 1, 1, 0.6f);
+            btn.colors = buttonColor;
+            btn.onClick.AddListener(() => {
+                #if AMP
+                ModSync.ModSyncClient.JoinAnyway();
+                #endif
+                ShowPage(Page.Connecting);
+                connectingMessage.text = "Joining...";
+            });
+            text = CreateObject("Text");
+            text.transform.SetParent(btn.transform, false);
+            rect = text.AddComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(450, 130);
+            btnText = text.AddComponent<TextMeshProUGUI>();
+            btnText.text = "Join anyway";
+            btnText.fontSize = 55;
+            btnText.color = Color.black;
+            btnText.alignment = TextAlignmentOptions.Center;
+
+            gobj = CreateObject("ModSyncLeave");
+            gobj.transform.SetParent(modSyncPanel);
+            rect = gobj.AddComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(450, 130);
+            rect.localPosition = new Vector3(245, -300, 0);
+            btn = gobj.AddComponent<Button>();
+            btn.targetGraphic = gobj.AddComponent<Image>();
+            btn.targetGraphic.color = new Color(1, 1, 1, 0.6f);
+            btn.colors = buttonColor;
+            btn.onClick.AddListener(() => {
+                #if AMP
+                ModSync.ModSyncClient.Decline();
+                #endif
+                ShowPage(Page.Serverlist);
+            });
+            text = CreateObject("Text");
+            text.transform.SetParent(btn.transform, false);
+            rect = text.AddComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(450, 130);
+            btnText = text.AddComponent<TextMeshProUGUI>();
+            btnText.text = "Disconnect";
+            btnText.fontSize = 55;
+            btnText.color = Color.red;
+            btnText.alignment = TextAlignmentOptions.Center;
+            #endregion
+
             #region Connecting
             gobj = CreateObject("WarningPanel");
             gobj.transform.SetParent(transform);
@@ -1378,6 +1465,7 @@ namespace AMP.UI {
             joinCodePanel.gameObject.SetActive(false);
             joinIpPanel.gameObject.SetActive(false);
             disconnectPanel.gameObject.SetActive(false);
+            modSyncPanel.gameObject.SetActive(false);
             connectingPanel.gameObject.SetActive(false);
             moderationPanel.gameObject.SetActive(false);
             moderationPanelPlayerList.gameObject.SetActive(false);
@@ -1453,6 +1541,11 @@ namespace AMP.UI {
                     connectingPanel.gameObject.SetActive(true);
                     connectingMessage.text = "";
                     connectingMessage.color = Color.black;
+                    break;
+                }
+                case Page.ModSync: {
+                    buttonBar.gameObject.SetActive(false);
+                    modSyncPanel.gameObject.SetActive(true);
                     break;
                 }
                 case Page.WARNING: {
@@ -2754,6 +2847,13 @@ namespace AMP.UI {
             yield return new WaitForSeconds(5);
 
             ShowPage(Page.IpHosting);
+        }
+
+        // Called by ModSyncClient on the main thread when the host's mods differ from ours
+        internal void ShowModSync(string description, bool canJoinAnyway) {
+            modSyncText.text = description;
+            modSyncJoinAnyway.SetActive(canJoinAnyway);
+            ShowPage(Page.ModSync);
         }
 
         // Port, password and max players come from inputCache in config.json (host_port, host_password, host_max_players)
