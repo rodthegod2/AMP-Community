@@ -243,6 +243,7 @@
     <Compile Include="ModSync\HostModSet.cs" />
     <Compile Include="ModSync\SyncPlanner.cs" />
     <Compile Include="ModSync\MessageChunks.cs" />
+    <Compile Include="ModSync\SettingsRules.cs" />
     <Compile Include="ModSync\ModSyncClient.cs" />
     <Compile Include="ModSync\ModSyncHost.cs" />
     <Compile Include="ModSync\ModSyncPaths.cs" />

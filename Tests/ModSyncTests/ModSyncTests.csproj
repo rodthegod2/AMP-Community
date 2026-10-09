@@ -17,6 +17,7 @@
     <Compile Include="..\..\ModSync\HostModSet.cs" />
     <Compile Include="..\..\ModSync\SyncPlanner.cs" />
     <Compile Include="..\..\ModSync\MessageChunks.cs" />
+    <Compile Include="..\..\ModSync\SettingsRules.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- The game's copy fails .NET Framework strong-name validation when loaded outside Unity, so use the signed package -->

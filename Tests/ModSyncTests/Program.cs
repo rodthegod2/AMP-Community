@@ -15,6 +15,7 @@ internal static class Program {
         InventoryTests();
         PlannerTests();
         ChunkTests();
+        SettingsTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -241,5 +242,29 @@ internal static class Program {
         var capped = new MessageAssembler();
         for(int i = 0; i < 200; i++) overlong = capped.Add("big", i, 200, "x");
         T("messages over 133 parts are rejected", overlong == null);
+    }
+
+    private static void SettingsTests() {
+        var personal  = new[] { "MyTool" };
+        var overrides = new System.Collections.Generic.Dictionary<string, string> { { "SpellMod/Spell Volume", "server" }, { "SpellMod/Damage", "personal" } };
+
+        T("gameplay option of a normal mod is server-side", SettingsRules.IsServerSide("SpellMod", "Fire Damage", "Combat", false, personal, overrides));
+        T("volume option is personal", !SettingsRules.IsServerSide("SpellMod", "Music Volume", "", false, personal, overrides));
+        T("category words count too", !SettingsRules.IsServerSide("SpellMod", "Size", "HUD", false, personal, overrides));
+        T("'ui' only matches as a whole word", SettingsRules.IsServerSide("SpellMod", "Build Speed", "Guide", false, personal, overrides));
+        T("haptics (longer word) is personal", !SettingsRules.IsServerSide("SpellMod", "Haptics Strength", "", false, personal, overrides));
+        T("options of personal mods are never synced", !SettingsRules.IsServerSide("mytool", "Fire Damage", "", false, personal, overrides));
+        T("override 'server' wins over the word list", SettingsRules.IsServerSide("SpellMod", "Spell Volume", "", false, personal, overrides));
+        T("override 'personal' wins", !SettingsRules.IsServerSide("SpellMod", "Damage", "", false, personal, overrides));
+        T("AMP: only the Host settings category", SettingsRules.IsServerSide("MultiplayerMod", "PvP", SettingsRules.AmpHostCategory, true, personal, overrides)
+                                                 && !SettingsRules.IsServerSide("MultiplayerMod", "Player Nametags", "Gameplay", true, personal, overrides));
+        T("null lists are fine", SettingsRules.IsServerSide("SpellMod", "Fire Damage", null, false, null, null));
+
+        var titles = new[] { "Off", "Low", "High" };
+        T("index and title agree", SettingsRules.MatchIndex(titles, new OptionValue { index = 2, title = "High" }) == 2);
+        T("title wins when the index moved", SettingsRules.MatchIndex(titles, new OptionValue { index = 0, title = "Low" }) == 1);
+        T("unknown title is no match", SettingsRules.MatchIndex(titles, new OptionValue { index = 1, title = "Ultra" }) == -1);
+        T("out of range index with unknown title is no match", SettingsRules.MatchIndex(titles, new OptionValue { index = 9, title = "?" }) == -1);
+        T("no titles is no match", SettingsRules.MatchIndex(new string[0], new OptionValue { index = 0, title = "Off" }) == -1);
     }
 }
