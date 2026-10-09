@@ -246,19 +246,23 @@ namespace AMP {
             }
         }
 
+        // Always called on the main thread
         internal static void JoinServer(NetamiteClient netClient, string password = "") {
-            StopClient();
+            // Stop the old client right away, a queued stop would run after the new client is set up and kill it instead
+            if(clientInstance != null) StopClientImmediatly();
 
             if(instance.gameObject.GetComponent<ClientSync>() != null) {
                 Destroy(instance.gameObject.GetComponent<ClientSync>());
             }
             clientSync = instance.gameObject.AddComponent<ClientSync>();
 
-            clientInstance = new Client(netClient);
+            Client client = new Client(netClient);
+            clientInstance = client;
 
             netClient.OnConnect += () => {
-                Dispatcher.Enqueue(() => { 
-                    clientInstance.StartSync();
+                Dispatcher.Enqueue(() => {
+                    if(clientInstance != client) return;
+                    client.StartSync();
                     EventHandler.RegisterGlobalEvents();
                     LevelFunc.Init();
                 });
@@ -266,19 +270,20 @@ namespace AMP {
                 try { ModManager.onConnectionSuccess.Invoke(); } catch(Exception e) { Log.Err(e); }
             };
 
+            // Events of a replaced client must not tear down the session that replaced it
             netClient.OnConnectionError += (error) => {
                 Log.Info(Defines.CLIENT, error);
-                StopClient();
+                StopClient(client);
                 try { ModManager.onConnectionError.Invoke(error); } catch (Exception e) { Log.Err(e); }
             };
 
             netClient.OnDisconnect += (reason) => {
                 Log.Info(Defines.CLIENT, "Disconnected: " + reason);
-                StopClient();
+                StopClient(client);
                 try { ModManager.onConnectionClose.Invoke(reason); } catch (Exception e) { Log.Err(e); }
             };
 
-            clientInstance.Connect(password);
+            client.Connect(password);
         }
 
         internal static void HostServer(uint maxPlayers, int port, string password, Action<string> callback) {
@@ -297,7 +302,11 @@ namespace AMP {
                 callback(error);
             };
 
-            serverInstance.Start(server);
+            try {
+                serverInstance.Start(server);
+            } catch(Exception e) { // e.g. the port is already in use
+                callback(e.Message);
+            }
         }
 #if STEAM
         internal static void HostSteamServer(uint maxPlayers, Action<string> callback) {
@@ -336,6 +345,12 @@ namespace AMP {
 
             Dispatcher.Enqueue(() => {
                 StopClientImmediatly();
+            });
+        }
+
+        private static void StopClient(Client onlyThis) {
+            Dispatcher.Enqueue(() => {
+                if(clientInstance == onlyThis) StopClientImmediatly();
             });
         }
 

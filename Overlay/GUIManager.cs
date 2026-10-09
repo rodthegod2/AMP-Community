@@ -65,7 +65,7 @@ namespace AMP.Overlay {
             public int id;
             public string servername;
             public string address;
-            public short port;
+            public int port;
             public string description;
             public string servericon;
             public byte official;
@@ -213,7 +213,7 @@ namespace AMP.Overlay {
                             host_password = GUI.PasswordField(new Rect(50, 100, 140, 20), host_password, '#', 10);
 
                             if(GUI.Button(new Rect(10, 125, 180, 20), "Host Server")) {
-                                HostServer(host_maxPlayers, int.Parse(host_port), host_password);
+                                HostServer(host_maxPlayers, host_port, host_password);
                             }
                             break;
 
@@ -305,10 +305,21 @@ namespace AMP.Overlay {
         }
 
 
+        // Netamite stores ports as short, so the usable range is 1-32767
+        internal static bool TryParsePort(string text, out int port) {
+            return int.TryParse(text?.Trim(), out port) && port > 0 && port <= short.MaxValue;
+        }
+
         public static void JoinServer(string address, string port, string password = "", bool save_cache = true) {
-            if(int.Parse(port) <= 0) return;
-            
-            NetamiteClient client = new IPClient(address, int.Parse(port));
+            address = address?.Trim();
+            if(string.IsNullOrEmpty(address) || !TryParsePort(port, out int portNumber)) {
+                string error = $"Invalid address or port \"{address}:{port}\" (port must be 1-{short.MaxValue})";
+                Log.Err(Defines.CLIENT, error);
+                try { ModManager.onConnectionError?.Invoke(error); } catch(Exception e) { Log.Err(e); }
+                return;
+            }
+
+            NetamiteClient client = new IPClient(address, portNumber);
             client.ConnectToken = password;
             client.ClientName = ModManager.instance.UserData.Name;
 
@@ -320,25 +331,34 @@ namespace AMP.Overlay {
             
             if (save_cache) {
                 ModManager.safeFile.inputCache.join_address  = address;
-                ModManager.safeFile.inputCache.join_port     = ushort.Parse(port);
+                ModManager.safeFile.inputCache.join_port     = (ushort) portNumber;
                 ModManager.safeFile.inputCache.join_password = password;
                 ModManager.safeFile.Save();
             }
         }
 
-        public static void HostServer(uint maxPlayers, int port, string password = "") {
-            ModManager.HostServer(maxPlayers, port, password, (error) => {
+        public static void HostServer(uint maxPlayers, string port, string password = "", Action<string> onError = null) {
+            if(!TryParsePort(port, out int portNumber)) {
+                string error = $"Invalid port \"{port}\" (must be 1-{short.MaxValue})";
+                Log.Err(Defines.SERVER, error);
+                onError?.Invoke(error);
+                return;
+            }
+
+            ModManager.HostServer(maxPlayers, portNumber, password, (error) => {
                 if(error == null) {
                     ModManager.safeFile.inputCache.host_max_players = maxPlayers;
-                    ModManager.safeFile.inputCache.host_port = (ushort)port;
+                    ModManager.safeFile.inputCache.host_port = (ushort) portNumber;
                     ModManager.safeFile.inputCache.host_password = password;
                     ModManager.safeFile.Save();
 
                     Dispatcher.Enqueue(() => {
-                        JoinServer("127.0.0.1", port + "", password, false);
+                        JoinServer("127.0.0.1", portNumber.ToString(), password, false);
                     });
                 } else {
+                    Log.Err(Defines.SERVER, "Hosting failed: " + error);
                     ModManager.StopHost();
+                    onError?.Invoke(error);
                 }
             });
         }

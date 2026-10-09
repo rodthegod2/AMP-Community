@@ -1811,7 +1811,7 @@ namespace AMP.UI {
 #endif
         private class JoinCodeInfo {
             public string address;
-            public short port;
+            public int port;
         }
 
         private class LobbyServerInfo {
@@ -1893,7 +1893,7 @@ namespace AMP.UI {
             public int id;
             public string servername;
             public string address;
-            public short port;
+            public int port;
             public string description;
             public string servericon;
             public byte official;
