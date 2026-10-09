@@ -53,6 +53,10 @@ namespace AMP.Data {
             public bool   hostAuthoritativeNpcs    = false;
             // Minimum seconds between two damage-triggered NPC owner changes (0 = off)
             public float  ownerHoldSeconds         = 1.5f;
+            // Mod sync on join: "off" (old behaviour), "warn" (joiners see differences and may still join), "enforce" (joiners must match)
+            public string   modSyncMode            = "warn";
+            // Mods joiners may keep, lack or have in another version; AMP itself always counts as personal
+            public string[] personalMods           = new string[] { "HJ_NexusModManager" };
 
             
             public bool useModWhitelist            = false;

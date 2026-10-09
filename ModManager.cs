@@ -103,6 +103,7 @@ namespace AMP {
             } else {
                 Log.Err(Defines.AMP, $"Can't save any configs, save path not retrievable.");
             }
+            ModSync.ModSyncPaths.Init();
             if(safeFile.modSettings.useBrowserIntegration) {
                 WebSocketInteractor.Start();
             }

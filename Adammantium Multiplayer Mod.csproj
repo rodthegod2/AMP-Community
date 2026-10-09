@@ -245,6 +245,7 @@
     <Compile Include="ModSync\MessageChunks.cs" />
     <Compile Include="ModSync\ModSyncClient.cs" />
     <Compile Include="ModSync\ModSyncHost.cs" />
+    <Compile Include="ModSync\ModSyncPaths.cs" />
     <Compile Include="Network\Packets\Implementation\ItemSpawnPacket.cs" />
     <Compile Include="Network\Packets\Implementation\LevelChangePacket.cs" />
     <Compile Include="Network\Packets\Implementation\CreatureSpawnPacket.cs" />

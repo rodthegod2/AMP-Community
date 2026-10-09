@@ -24,6 +24,7 @@ namespace AMP.Network.Data {
         };
 
         internal bool greeted = false;
+        internal string modSyncState = ""; // "", "waiting", "setup", "ready" (see ModSyncHost)
 
         internal PlayerNetworkData _player = null;
 
