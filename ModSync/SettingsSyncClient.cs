@@ -11,6 +11,7 @@ using System.IO;
 using System.Linq;
 using ThunderRoad;
 using UnityEngine;
+using ClientType = AMP.Network.Client.Client;
 
 namespace AMP.ModSync {
     // Joiner side of settings sync. Main thread only, except OnPacket.
@@ -28,6 +29,8 @@ namespace AMP.ModSync {
         internal static bool ApplyingHostValues { get; private set; }
 
         internal static void OnPacket(ModSyncPacket packet) {
+            ClientType client = ModManager.clientInstance;
+            if(client == null) return;
             string json = assembler.Add("settings:" + packet.transferId, packet.part, packet.parts, packet.data);
             if(json == null) return;
             SettingsMessage message;
@@ -37,7 +40,10 @@ namespace AMP.ModSync {
                 return;
             }
             if(message == null || message.values == null) return;
-            Dispatcher.Enqueue(() => Apply(message));
+            // Values of a server we already left must not reach the next one
+            Dispatcher.Enqueue(() => {
+                if(ModManager.clientInstance == client) Apply(message);
+            });
         }
 
         private static void Apply(SettingsMessage message) {
@@ -53,7 +59,9 @@ namespace AMP.ModSync {
 
                 string key = value.mod + "/" + value.option;
                 if(!originals.ContainsKey(key)) {
-                    originals[key] = ModOptionBridge.Read(option);
+                    // A backup from a crash that wasn't restored yet holds the player's real value, our current one is the old host's
+                    OptionValue unrestored = LoadBackup().FirstOrDefault(v => v.mod + "/" + v.option == key);
+                    originals[key] = unrestored ?? ModOptionBridge.Read(option);
                     SaveBackup();
                 }
                 hostIndex[key] = index;
@@ -105,17 +113,45 @@ namespace AMP.ModSync {
             hostIndex.Clear();
             assembler.Forget("");
 
-            RestoreValues(originals.Values.ToList());
+            // Entries of an earlier crash that are still waiting (see StartupRoutine) are restored too
+            List<OptionValue> values = originals.Values.ToList();
+            values.AddRange(LoadBackup().Where(v => !originals.ContainsKey(v.mod + "/" + v.option)));
             originals.Clear();
-            DeleteBackup();
+            if(values.Count > 0) RestoreAndClean(values);
         }
 
-        private static void RestoreValues(List<OptionValue> values) {
+        // Sets the values, writes the Options file (the game only does that on its own schedule, a quit would lose it)
+        // and only then drops the backup. Entries whose option exists but has no values yet stay in the backup.
+        private static void RestoreAndClean(List<OptionValue> values) {
+            List<OptionValue> notLoaded = RestoreValues(values);
+            if(SaveOptionsNow()) WriteBackup(notLoaded);
+        }
+
+        // Returns the entries whose option exists but isn't loaded yet; options we don't have at all are dropped
+        private static List<OptionValue> RestoreValues(List<OptionValue> values) {
+            var notLoaded = new List<OptionValue>();
             foreach(OptionValue value in values) {
                 ModOption option = ModOptionBridge.Find(value.mod, value.option);
                 if(option == null) continue;
-                int index = SettingsRules.MatchIndex(ModOptionBridge.Titles(option), value);
+                string[] titles = ModOptionBridge.Titles(option);
+                if(titles.Length == 0) {
+                    notLoaded.Add(value);
+                    continue;
+                }
+                int index = SettingsRules.MatchIndex(titles, value);
                 if(index >= 0 && option.GetIndex(false) != index) Set(option, index);
+            }
+            return notLoaded;
+        }
+
+        // Same call the game's own menu makes when it closes
+        private static bool SaveOptionsNow() {
+            try {
+                if(ThunderRoad.Options.isDirty) ThunderRoad.Options.SaveCoroutine().AsSynchronous();
+                return true;
+            } catch(Exception e) {
+                Log.Err(Defines.CLIENT, "Settings sync: couldn't save the options. " + e.Message);
+                return false;
             }
         }
 
@@ -127,23 +163,20 @@ namespace AMP.ModSync {
             HashSet<string> hadSavedValue = SavedHostOptions();
             Dictionary<string, object> configValues = ConfigValues();
 
+            // A mod whose options failed to load keeps this from ever being true: go on after a while with what is there
             float waited = 0f;
-            while(!ModOptionBridge.OptionsLoaded()) {
-                if(waited >= 600f) {
-                    Log.Warn(Defines.CLIENT, "Settings sync: Mod Options did not finish loading, skipping startup checks.");
-                    yield break;
-                }
+            while(!ModOptionBridge.OptionsLoaded() && waited < 600f) {
                 yield return new WaitForSecondsRealtime(1f);
                 waited += 1f;
             }
+            if(waited >= 600f) Log.Warn(Defines.CLIENT, "Settings sync: Mod Options did not finish loading, continuing with the ones that did.");
             ReconcileHostSettings(hadSavedValue, configValues);
 
             List<OptionValue> leftover = LoadBackup();
             if(leftover.Count > 0) {
                 Log.Info(Defines.CLIENT, $"Settings sync: restoring {leftover.Count} settings from the last session.");
-                RestoreValues(leftover);
+                RestoreAndClean(leftover);
             }
-            DeleteBackup();
         }
 
         // Names of AMP's host-setting options the player already has a saved menu value for. Null: can't tell.
@@ -186,11 +219,22 @@ namespace AMP.ModSync {
 
         private static string BackupPath { get { return Path.Combine(ModSyncPaths.CacheFolder ?? "", BackupFile); } }
 
+        // Adds this session's originals to what an earlier, not yet restored session left in the file
         private static void SaveBackup() {
+            List<OptionValue> all = LoadBackup().Where(v => !originals.ContainsKey(v.mod + "/" + v.option)).ToList();
+            all.AddRange(originals.Values);
+            WriteBackup(all);
+        }
+
+        private static void WriteBackup(List<OptionValue> values) {
             if(!ModSyncPaths.Available) return;
+            if(values.Count == 0) {
+                DeleteBackup();
+                return;
+            }
             try {
                 Directory.CreateDirectory(ModSyncPaths.CacheFolder);
-                File.WriteAllText(BackupPath, JsonConvert.SerializeObject(originals.Values.ToList()));
+                File.WriteAllText(BackupPath, JsonConvert.SerializeObject(values));
             } catch(IOException) { } catch(UnauthorizedAccessException) { }
         }
 

@@ -57,23 +57,20 @@ namespace AMP.Network.Data {
 
         public List<ClientData> votersForKick = new List<ClientData>();
         
-        private float damageMultiplicator = ModManager.safeFile.hostingSettings.pvpDamageMultiplier;
+        // Without a value set for this player, the host's current setting counts (it can change while the player is connected)
+        private float? damageMultiplicator;
 
         #region Damaging
         public void SetInvulnerable(bool invulnerable) {
-            if(invulnerable) {
-                damageMultiplicator = 0f;
-            } else {
-                damageMultiplicator = ModManager.safeFile.hostingSettings.pvpDamageMultiplier;
-            }
+            damageMultiplicator = invulnerable ? 0f : (float?) null;
         }
 
         public bool IsInvulnerable() {
-            return damageMultiplicator <= 0;
+            return GetDamageMultiplicator() <= 0;
         }
 
         public float GetDamageMultiplicator() {
-            return damageMultiplicator;
+            return damageMultiplicator ?? ModManager.safeFile.hostingSettings.pvpDamageMultiplier;
         }
 
         public void SetDamageMultiplicator(float multiplicator) {
@@ -82,12 +79,12 @@ namespace AMP.Network.Data {
         #endregion
 
         #region Pushback
-        private float pushbackMultiplicator = ModManager.safeFile.hostingSettings.pvpPushbackMultiplier;
+        private float? pushbackMultiplicator;
 
         public float GetPlayerPushbackMultiplicator() {
-            return pushbackMultiplicator;
+            return pushbackMultiplicator ?? ModManager.safeFile.hostingSettings.pvpPushbackMultiplier;
         }
-        
+
         public void SetPushbackMultiplicator(float multiplicator) {
             pushbackMultiplicator = multiplicator;
         }

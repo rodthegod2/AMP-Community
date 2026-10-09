@@ -30,14 +30,23 @@ namespace AMP.ModSync {
             return option.parameterValues.Select(p => p == null ? "" : (p.title ?? (p.value == null ? "" : p.value.ToString()))).ToArray();
         }
 
-        // Index of the parameter holding this value (e.g. true, 20), or -1
+        // Index of the parameter holding this value (e.g. true, 20), or -1. A number between two steps
+        // (25 for steps of 10) takes the nearest one.
         internal static int IndexOfValue(ModOption option, object value) {
             if(option.parameterValues == null) return -1;
             for(int i = 0; i < option.parameterValues.Length; i++) {
                 ModOptionParameter parameter = option.parameterValues[i];
                 if(parameter != null && value.Equals(parameter.value)) return i;
             }
-            return -1;
+            if(!(value is int)) return -1;
+
+            int nearest = -1;
+            for(int i = 0; i < option.parameterValues.Length; i++) {
+                ModOptionParameter parameter = option.parameterValues[i];
+                if(parameter == null || !(parameter.value is int)) continue;
+                if(nearest < 0 || System.Math.Abs((int) parameter.value - (int) value) < System.Math.Abs((int) option.parameterValues[nearest].value - (int) value)) nearest = i;
+            }
+            return nearest;
         }
 
         internal static OptionValue Read(ModOption option) {
@@ -56,7 +65,8 @@ namespace AMP.ModSync {
             option.Apply(index);
             UIList list = option.uiComponent as UIList;
             if(list != null) list.LoadValue(false);
-            option.RefreshUI();
+            // A closed menu leaves a destroyed component behind: a Unity null check, not a plain one
+            if((option.uiComponent as UnityEngine.Object) != null) option.RefreshUI();
         }
     }
 }
