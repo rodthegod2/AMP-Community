@@ -424,8 +424,6 @@ namespace AMP.UI {
             btnText.color = Color.black;
             btnText.fontSize = 35;
             btnText.alignment = TextAlignmentOptions.Center;
-
-
             #endregion
 
             #region Join Code Panel
@@ -537,7 +535,7 @@ namespace AMP.UI {
             gobj.transform.SetParent(rect.transform);
             rect = gobj.AddComponent<RectTransform>();
             rect.sizeDelta = new Vector2(400, 150);
-            rect.localPosition = new Vector3(0, 0, 0);
+            rect.localPosition = new Vector3(0, 0, -20);
             joinCode = gobj.AddComponent<TextMeshProUGUI>();
             joinCode.color = Color.black;
             joinCode.alignment = TextAlignmentOptions.Center;
@@ -1327,7 +1325,11 @@ namespace AMP.UI {
                 FixSize(child);
             }
         }
-
+        
+        internal void RefreshPage() {
+            ShowPage(currentPage);
+        }
+        
         private Page currentPage = Page.Serverlist;
         private void ShowPage(Page page) {
             if(page == Page.WARNING && showedWarning) {
@@ -2132,7 +2134,7 @@ namespace AMP.UI {
                     banIcon.LoadImage(AMPResources.ban);
                     Button banBtn = CreateButton("Ban", Color.black, new Vector2(400, 50), banIcon);
                     banBtn.transform.SetParent(gobj.transform, false);
-                    kickBtn.onClick.AddListener(() => {
+                    banBtn.onClick.AddListener(() => {
                         Log.Debug($"Requesting Ban of {pnd.name}");
                         new ModerationBanPacket(pnd.clientId).SendToServer();
                     });
@@ -2371,11 +2373,11 @@ namespace AMP.UI {
         private IEnumerator FailedConnectionCoroutine(string reason) {
             if ("SERVER_FULL".Equals(reason)) reason = "Server is full";
             else if ("WRONG_PASSWORD".Equals(reason)) reason = "Wrong password";
+            else if ("SERVER_CLOSED".Equals(reason)) reason = "Server closed";
             else if ("CONNECTION_CLOSED".Equals(reason)) yield break;
 
-
             ShowPage(Page.Connecting);
-            connectingMessage.text = $"Connection failed.\n\nReason: {reason}";
+            connectingMessage.text = $"Connection closed.\n\nReason: {reason}";
             connectingMessage.color = Color.red;
 
             yield return new WaitForSeconds(5);

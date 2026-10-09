@@ -3,6 +3,7 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using UnityEngine.Networking;
 
 namespace AMP.Data {
     public class Banlist {

@@ -33,6 +33,11 @@ namespace AMP.Network.Packets.Implementation {
             if(c != null) {
                 if(magicId != null && magicId != "" && magicId.Length > 0) { // Started Magic
                     SpellCastData scd = Catalog.GetData<SpellData>(magicId) as SpellCastData;
+                    if(scd == null) {
+                        Log.Warn(Defines.CLIENT, $"Tried casting magic spell \"{magicId}\", but was not found. Using fallback spell \"{Config.FALLBACK_SPELL_ID}\" instead.");
+                        scd = Catalog.GetData<SpellData>(Config.FALLBACK_SPELL_ID) as SpellCastData;
+                    }
+
                     if(scd != null) {
                         SpellCaster caster = c.GetHand((Side) handIndex).caster;
 
@@ -42,8 +47,6 @@ namespace AMP.Network.Packets.Implementation {
                                 caster.Fire(true);
                             });
                         }
-                    } else {
-                        Log.Warn(Defines.CLIENT, $"Tried casting magic spell \"{magicId}\", but was not found.");
                     }
                 } else { // Stopped Magic
                     SpellCaster caster = c.GetHand((Side) handIndex).caster;

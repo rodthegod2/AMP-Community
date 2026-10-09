@@ -152,27 +152,51 @@ namespace AMP.Network.Server {
                     return;
                 }
             }
-
+            
             // Send all player data to the new client
-            foreach(ClientData other_client in netamiteServer._clients.Values) {
+            foreach(ClientData other_client in netamiteServer.Clients.ToArray()) {
                 if(other_client._player == null) continue;
                 netamiteServer.SendTo(client, new PlayerDataPacket(other_client.player));
                 netamiteServer.SendTo(client, new PlayerEquipmentPacket(other_client.player));
             }
-
+            
             SendItemsAndCreatures(client);
-        
-            Log.Info(Defines.SERVER, $"Player {client.ClientName} ({client.ClientId} / {client.player.uniqueId}) joined the server.");
+            
+            Log.Info(Defines.SERVER, $"Player {client.ClientName} ({client.ClientId}) joined the server.");
             Log.Info(Defines.SERVER, $"{netamiteServer.ConnectedClients} / {netamiteServer.MaxClients} Players currently connected: { string.Join(", ", netamiteServer._clients.Select(x => x.Value.ClientName).ToArray()) }");
-
+            
+            CheckAutoModerator();
+            
             ServerEvents.InvokeOnPlayerJoin(client);
             
             ModManager.serverInstance.netamiteServer.InitializeTimeSync(client);
-
+            
             client.greeted = true;
             client.LoadedLevel = true;
         }
 
+        /// <summary>
+        /// Checks if there is a moderator in the lobby. If not and auto lobby moderator is enabled, it will assign the first player that connected.
+        /// </summary>
+        internal void CheckAutoModerator() {
+            if (!ModManager.safeFile.hostingSettings.autoLobbyModerator) return;
+            if (netamiteServer.ConnectedClients == 0) return;
+
+            bool hasModerator = false;
+            foreach (ClientData other_client in netamiteServer.Clients.ToArray()) {
+                if (other_client.permissionLevel >= Datatypes.PermissionLevel.LOBBY_ADMIN) {
+                    hasModerator = true;
+                    break;
+                }
+            }
+
+            if (!hasModerator) {
+                ClientData client = ((ClientData)netamiteServer.Clients[0]);
+                client.permissionLevel = Datatypes.PermissionLevel.LOBBY_ADMIN;
+                Log.Info(Defines.SERVER, $"Player {client.ClientName} has been automatically promoted to lobby admin.");
+            }
+        }
+        
         internal void SendItemsAndCreatures(ClientInformation client) {
             if(items.Count > 0 || creatures.Count > 0) {
                 // Clear all already present stuff first
@@ -180,7 +204,7 @@ namespace AMP.Network.Server {
             }
 
             // Send all spawned creatures to the client
-            foreach(KeyValuePair<int, CreatureNetworkData> entry in creatures) {
+            foreach(KeyValuePair<int, CreatureNetworkData> entry in creatures.ToArray()) {
                 netamiteServer.SendTo(client, new CreatureSpawnPacket(entry.Value));
             }
 
@@ -332,6 +356,8 @@ namespace AMP.Network.Server {
                 }
             }
 
+            CheckAutoModerator();
+            
             ServerEvents.InvokeOnPlayerQuit(client);
 
             Log.Info(Defines.SERVER, $"{client.ClientName} disconnected. {reason}");
@@ -346,7 +372,7 @@ namespace AMP.Network.Server {
             try {
                 id = int.Parse(name);
             } catch(Exception) {
-                foreach(var client in ModManager.serverInstance.Clients) {
+                foreach(var client in ModManager.serverInstance.Clients.ToArray()) {
                     if(client.ClientName.ToLower().Contains(name.ToLower())) {
                         id = client.ClientId;
                         break;

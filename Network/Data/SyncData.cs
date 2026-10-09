@@ -10,7 +10,7 @@ namespace AMP.Network.Data {
         internal int currentClientCreatureId = 1;
         internal int currentClientEntityId = 1;
 
-        internal PermissionLevel permissionLevel = PermissionLevel.MODERATOR;
+        internal PermissionLevel permissionLevel = PermissionLevel.NORMAL;
 
         internal ConcurrentDictionary<int, ItemNetworkData> items = new ConcurrentDictionary<int, ItemNetworkData>();
 

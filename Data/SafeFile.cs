@@ -25,46 +25,48 @@ namespace AMP.Data {
             public bool useAdvancedNpcSyncing   = true;
             public bool useSpaceWarMode         = false;
             public float minPredictionTreshhold = 0.15f;
-
+            
             public bool ShouldPredict(float compensationFactor) {
                 return ModLoader.ClientsidePrediction && compensationFactor > minPredictionTreshhold;
             }
         }
-
+        
         public class HostingSettings {
-            public bool   pvpEnable             = true;
-            public float  pvpDamageMultiplier   = 0.2f;
-            public float  pvpPushbackMultiplier = 2f;
-            public bool   allowMapChange        = true;
-            public int    maxItemsPerPlayer     = 250;
-            public int    maxCreaturesPerPlayer = 15;
-            public string masterServerUrl       = "amp.adamite.de";
-            public bool   allowVoiceChat        = true;
-            public byte   baseTickRate          = 10;
-            public byte   playerTickRate        = 30;
-
+            public bool   pvpEnable                = true;
+            public float  pvpDamageMultiplier      = 0.2f;
+            public float  pvpPushbackMultiplier    = 2f;
+            public bool   allowMapChange           = true;
+            public int    maxItemsPerPlayer        = 250;
+            public int    maxCreaturesPerPlayer    = 15;
+            public string masterServerUrl          = "amp.adamite.de";
+            public bool   allowVoiceChat           = true;
+            public byte   baseTickRate             = 10;
+            public byte   playerTickRate           = 30;
+            public bool   autoLobbyModerator       = false;
+            public bool   useGlobalPlayerBanlist   = false;
             // NPC authority: the host keeps every NPC it owns unless somebody explicitly grabs it
-            public bool   hostAuthoritativeNpcs = false;
+            public bool   hostAuthoritativeNpcs    = false;
             // Minimum seconds between two damage-triggered NPC owner changes (0 = off)
-            public float  ownerHoldSeconds      = 1.5f;
+            public float  ownerHoldSeconds         = 1.5f;
 
-            public bool useModWhitelist         = false;
-            public string[] modWhitelist        = new string[0];
-            public bool useModBlacklist         = false;
-            public string[] modBlacklist        = new string[0];
-            public bool useModRequirelist       = false;
-            public string[] modRequirelist      = new string[0];
+            
+            public bool useModWhitelist            = false;
+            public string[] modWhitelist           = new string[0];
+            public bool useModBlacklist            = false;
+            public string[] modBlacklist           = new string[0];
+            public bool useModRequirelist          = false;
+            public string[] modRequirelist         = new string[0];
         }
-
+        
         public class InputCache {
-            public string join_address            = "127.0.0.1";
-            public ushort join_port               = 26950;
-            public string join_password           = "";
-
-            public ushort host_port               = 26950;
-            public string host_password           = "";
-            public uint   host_max_players        = 4;
-            public bool   host_steam_friends_only = true;
+            public string join_address             = "127.0.0.1";
+            public ushort join_port                = 26950;
+            public string join_password            = "";
+            
+            public ushort host_port                = 26950;
+            public string host_password            = "";
+            public uint   host_max_players         = 4;
+            public bool   host_steam_friends_only  = true;
         }
         #endregion
         

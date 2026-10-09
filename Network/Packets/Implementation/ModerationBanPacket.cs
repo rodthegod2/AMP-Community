@@ -24,9 +24,9 @@ namespace AMP.Network.Packets.Implementation {
         }
         
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
-            ClientData target = (ClientData)server.GetClientById(ClientId);
+            ClientData target = (ClientData) server.GetClientById(ClientId);
             if (target == null) return true;
-
+            
             if (client.permissionLevel >= PermissionLevel.LOBBY_ADMIN) {
                 if (client.permissionLevel >= PermissionLevel.MODERATOR) {
                     target.TempBan("You got locked out\n of the lobby by a moderator");
@@ -34,7 +34,7 @@ namespace AMP.Network.Packets.Implementation {
                     target.TempBan("You got locked out\n by the lobby admin");
                 }
             } else {
-                Log.Warn($"{client.ClientName} tried to ban player ${ClientId}, but didn't have the permission.");
+                Log.Warn($"{client.ClientName} tried to ban player {target.ClientName}, but didn't have the permission.");
             }
             return true;
         }

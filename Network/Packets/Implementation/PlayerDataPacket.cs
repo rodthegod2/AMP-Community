@@ -1,5 +1,6 @@
 ﻿using AMP.Discord;
 using AMP.GameInteraction;
+using AMP.Logging;
 using AMP.Network.Data;
 using AMP.Network.Data.Sync;
 using AMP.Threading;
@@ -19,7 +20,7 @@ namespace AMP.Network.Packets.Implementation {
         [SyncedVar(true)] public float   height;
         [SyncedVar]       public Vector3 playerPos;
         [SyncedVar(true)] public float   playerRotY;
-        [SyncedVar]       public string  uniqueId = "";
+        [SyncedVar]       public string  uniqueId;
 
         public PlayerDataPacket() { }
 
@@ -77,6 +78,8 @@ namespace AMP.Network.Packets.Implementation {
             */
 
             DiscordIntegration.Instance.UpdateActivity();
+            Dispatcher.Enqueue(() => { UI.IngameModUI.currentUI?.RefreshPage(); });
+            
             return true;
         }
 
@@ -85,8 +88,7 @@ namespace AMP.Network.Packets.Implementation {
             client.player.Apply(this);
 
             client.player.clientId = client.ClientId;
-
-
+            
             if(client.IsBanned()) {
                 client.Kick("You are banned from this server.");
                 return true;

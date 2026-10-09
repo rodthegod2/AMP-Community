@@ -4,6 +4,7 @@ using AMP.Logging;
 using AMP.Useless;
 using Discord;
 using Netamite.Helper;
+using Oculus.Platform;
 using System;
 #if STEAM
 using Netamite.Steam.Integration;
@@ -54,18 +55,36 @@ namespace AMP.SupportFunctions {
         private static Task<string> GetPlatformNameAsync() {
             var tcs = new TaskCompletionSource<string>();
             try {
-                GameManager.platform.store.GetUserName((success, platformName) => {
-                    if (success) {
-                        tcs.SetResult(SanitizeName(platformName));
-                        Log.Debug(Defines.AMP, $"Got name from B&S: {platformName}");
-                    } else {
+                GameManager.platform.store.GetUserID((id_success, id) => {
+                    if (!id_success) {
                         tcs.SetResult(string.Empty);
+                        return;
                     }
+                    
+                    Users.Get(id).OnComplete(message => {
+                        if (!message.IsError && !string.IsNullOrWhiteSpace(message.Data.DisplayName)) {
+                            tcs.SetResult(SanitizeName(message.Data.DisplayName));
+                            Log.Debug(Defines.AMP, $"Got username from B&S: {message.Data.DisplayName}");
+                            return;
+                        }
+                        tcs.SetResult(string.Empty);
+                    });
                 });
-            } catch(Exception exp) {
-                Log.Err(Defines.AMP, exp);
-                
-                tcs.SetResult(string.Empty);
+            } catch(Exception) {
+                try {
+                    GameManager.platform.store.GetUserName((name_success, name) => {
+                        if (name_success) {
+                            tcs.SetResult(SanitizeName(name));
+                            Log.Debug(Defines.AMP, $"Got username from B&S: {name}");
+                            return;
+                        }
+                        tcs.SetResult(string.Empty);
+                    });
+                } catch (Exception exp) {
+                    Log.Err(Defines.AMP, exp);
+
+                    tcs.SetResult(string.Empty);
+                }
             }
             return tcs.Task;
         }

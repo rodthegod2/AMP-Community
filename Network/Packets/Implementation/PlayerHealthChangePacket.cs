@@ -68,6 +68,7 @@ namespace AMP.Network.Packets.Implementation {
             return !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
+        private static float intensity = 1f;
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             if(!ModManager.safeFile.hostingSettings.pvpEnable) return true;
 
@@ -80,10 +81,11 @@ namespace AMP.Network.Packets.Implementation {
 
             if(change < 0) { // Its damage
                 change *= client.GetDamageMultiplicator();
-                pushbackForce *= client.GetPlayerPushbackMultiplicator();
 
                 if(change >= 0) return true; // Damage is zero after the damage multiplication
 
+                pushbackForce = client.ApplyPushbackMultiplicator(pushbackForce);
+                
                 ClientData damaged = ModManager.serverInstance.GetClientById(ClientId);
                 if(damaged != null) {
 

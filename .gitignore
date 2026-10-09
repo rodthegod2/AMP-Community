@@ -3,3 +3,4 @@ bin
 /Dotfuscated
 .vs/
 .vscode/
+mono_crash*

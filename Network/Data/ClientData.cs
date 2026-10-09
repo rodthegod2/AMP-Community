@@ -1,8 +1,14 @@
-﻿using AMP.Data;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net;
+using System.Threading;
+using AMP.Data;
 using AMP.Datatypes;
 using AMP.Logging;
 using AMP.Network.Data.Sync;
 using AMP.Network.Packets.Implementation;
+using AMP.Threading;
 using Netamite.Network.Packet;
 using Netamite.Server.Data;
 using UnityEngine;
@@ -47,6 +53,8 @@ namespace AMP.Network.Data {
 
         public ClientData() { }
 
+        public List<ClientData> votersForKick = new List<ClientData>();
+        
         private float damageMultiplicator = ModManager.safeFile.hostingSettings.pvpDamageMultiplier;
 
         #region Damaging
@@ -80,6 +88,19 @@ namespace AMP.Network.Data {
         
         public void SetPushbackMultiplicator(float multiplicator) {
             pushbackMultiplicator = multiplicator;
+        }
+        
+        public Vector3 ApplyPushbackMultiplicator(Vector3 vec, float intensity = 1f) {
+            float magnitude = vec.magnitude;
+            
+            if (magnitude > 0) {
+                float factor = (float) (Math.Log(1 + magnitude * intensity) / (magnitude * intensity));
+                vec *= factor;
+            }
+            
+            vec *= GetPlayerPushbackMultiplicator();
+            
+            return vec;
         }
         #endregion
 
@@ -155,7 +176,7 @@ namespace AMP.Network.Data {
             ModManager.serverInstance.netamiteServer.ClientLeft(this, reason);
             ModManager.serverInstance.LeavePlayer(this, reason);
         }
-
+        
         // Bans a player for the duration of this session
         public void TempBan(string reason) {
             BanEntry banEntry = new BanEntry();
@@ -164,18 +185,61 @@ namespace AMP.Network.Data {
             banEntry.reason = reason;
             
             ModManager.tempBanlist.Add(banEntry);
+            Kick(reason);
         }
         
         public void Ban(string reason) {
             ModManager.banlist.Ban(this, reason);
+            Kick(reason);
         }
 
         internal bool IsBanned() {
-            foreach(BanEntry entry in ModManager.tempBanlist) {
+            foreach (BanEntry entry in ModManager.tempBanlist) {
                 if(entry.id == player.uniqueId) { return true; }
             }
             
+            if (ModManager.safeFile.hostingSettings.useGlobalPlayerBanlist) {
+                Thread thread = new Thread(IsGloballyBanned) {
+                    Name = "CheckGlobalBan"
+                };
+                thread.Start();
+            }
+            
             return ModManager.banlist.IsBanned(this);
+        }
+        
+        internal void IsGloballyBanned() {
+            if (player.uniqueId == null || player.uniqueId.Length == 0) {
+                Dispatcher.Enqueue(() => {
+                    Log.Err(Defines.SERVER, $"Couldn't check global banlist for {ClientName}. There was no id supllied, not sure what to do.");
+                });
+                return;
+            }
+            
+            try {
+                WebRequest request = WebRequest.Create($"https://{ModManager.safeFile.hostingSettings.masterServerUrl}/api/bancheck.php?id={player.uniqueId}");
+                HttpWebResponse response = (HttpWebResponse)request.GetResponse();
+                
+                if (response.StatusCode == HttpStatusCode.OK) {
+                    Stream dataStream = response.GetResponseStream();
+                    StreamReader reader = new StreamReader(dataStream);
+                    
+                    string responseFromServer = reader.ReadToEnd();
+                    
+                    if("[{\"ok\":true}]".Equals(responseFromServer)) {
+                        Ban("You are banned from all public servers.");
+                    }
+                } else {
+                    Dispatcher.Enqueue(() => {
+                        Log.Err(Defines.SERVER, $"Couldn't check global banlist for {ClientName} ({ClientId}), this should not happen. Please check server status. Player will be able to join.");
+                    });
+                }
+            }catch(WebException exp) {
+                Dispatcher.Enqueue(() => {
+                    Log.Err(Defines.SERVER, $"Couldn't check global banlist for {ClientName} ({ClientId}), this should not happen. Please check server status. Player will be able to join.");
+                    Log.Err(Defines.SERVER, exp);
+                });
+            }
         }
         #endregion
     }

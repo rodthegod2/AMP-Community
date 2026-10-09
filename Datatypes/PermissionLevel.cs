@@ -1,8 +1,9 @@
 ﻿using System;
 namespace AMP.Datatypes {
     public enum PermissionLevel {
-        NORMAL = 1,
-        LOBBY_ADMIN = 10,
-        MODERATOR = 20
+        DISABLED = 0,
+        NORMAL = 10,
+        LOBBY_ADMIN = 20,
+        MODERATOR = 30
     }
 }

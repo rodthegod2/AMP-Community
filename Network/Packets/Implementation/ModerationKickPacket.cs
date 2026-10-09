@@ -32,7 +32,7 @@ namespace AMP.Network.Packets.Implementation {
                     target.Kick("You got kicked by the lobby admin");
                 }
             } else {
-                Log.Warn($"{client.ClientName} tried to kick player ${ClientId}, but didn't have the permission.");
+                Log.Warn($"{client.ClientName} tried to kick player {target.ClientName}, but didn't have the permission.");
             }
             
             return true;

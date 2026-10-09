@@ -12,38 +12,38 @@ namespace AMP.Network.Data.Sync {
         #region Values
         internal int clientId = 0;
         internal string name = "";
-
+        
         internal string creatureId = "HumanMale";
         internal float height = 1.8f;
-
+        
         internal Vector3 handLeftPos = Vector3.zero;
         internal Vector3 handLeftRot = Vector3.zero;
-
+        
         internal Vector3 handRightPos = Vector3.zero;
         internal Vector3 handRightRot = Vector3.zero;
-
+        
         internal Vector3 headPos = Vector3.zero;
         internal Vector3 headRot = Vector3.zero;
-
+        
         internal Vector3 velocity = Vector3.zero;
         internal float rotationYVel = 0f;
         internal Vector3 position = Vector3.zero;
         public Vector3 Position { get { return position; } }
-
+        
         internal float rotationY   = 0f;
         public float RotationY { get { return rotationY; } }
-
+        
         internal Vector3[] ragdollPositions;
         internal Quaternion[] ragdollRotations;
         internal Vector3[] ragdollVelocity;
         internal Vector3[] ragdollAngularVelocity;
-
+        
         public float health = 1f;
-
+        
         internal string[] equipment = new string[0];
         internal Color[] colors = new Color[6];
         internal string ethnicGroup;
-
+        
         // Client only stuff
         internal bool isSpawning = false;
         internal Creature creature;
@@ -54,15 +54,15 @@ namespace AMP.Network.Data.Sync {
                 return _networkCreature;
             }
         }
-
+        
         internal long lastRagdollTimestamp = 0;
         internal bool receivedPos = false;
-
+        
         public string uniqueId = "";
-
+        
         internal ClientData lastDamager;
         #endregion
-
+        
         #region Packet Generation and Reading
         internal void Apply(PlayerDataPacket p) {
             clientId   = p.clientId;

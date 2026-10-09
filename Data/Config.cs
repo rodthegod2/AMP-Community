@@ -62,6 +62,9 @@ namespace AMP.Data {
             { "helmet",   "ApparelSoldierHelmet"   },
             { "hood",     "ApparelBattlemageCloak" },
         };
+		
+        // Spell id used when a synced spell isn't found locally (e.g. mod not installed)
+        public const string FALLBACK_SPELL_ID = "Gravity";
 
         public static int BASE_TICK_RATE = 10;
         public static int PLAYER_TICK_RATE = 30;

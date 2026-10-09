@@ -147,6 +147,9 @@
     <Reference Include="System">
       <HintPath>..\..\..\..\..\usr\lib\mono\4.7.2-api\System.dll</HintPath>
     </Reference>
+    <Reference Include="Oculus.Platform">
+      <HintPath>$(GameDllDirectory)\Oculus.Platform.dll</HintPath>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Compression\Base256.cs" />

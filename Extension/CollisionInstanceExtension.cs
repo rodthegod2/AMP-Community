@@ -49,5 +49,14 @@ namespace AMP.Extension {
             return false;
         }
 
+        public static bool IsDoneByAnyProjectile(this CollisionInstance collisionInstance) {
+            if (collisionInstance.sourceColliderGroup) {
+                if (collisionInstance.sourceColliderGroup.collisionHandler.item?.GetComponentInChildren<ItemMagicProjectile>(true) != null) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
     }
 }

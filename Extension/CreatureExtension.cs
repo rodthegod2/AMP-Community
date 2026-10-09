@@ -51,7 +51,7 @@ namespace AMP.Extension {
                     if(itemData == null) {
                         string replacement = DataReplacementFinder.FindWardrobeReplacement(referenceID);
 
-                        itemData = Catalog.GetData<ItemData>(referenceID);
+                        itemData = Catalog.GetData<ItemData>(replacement);
                         if(itemData == null) {
                             Log.Err(Defines.CLIENT, $"Equipment { referenceID } for { creature.creatureId } not found, no replacement found, please check you mods.");
                         } else {
