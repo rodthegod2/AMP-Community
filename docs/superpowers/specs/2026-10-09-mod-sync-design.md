@@ -188,6 +188,25 @@ AMP's own folder is a special `ModEntry` (`isAmp`). Host and joiner compare the 
 - On join (normal profile) AMP records the joiner's own indices; on leave it restores them, so host values aren't saved into the solo `Options.opt`.
 - AMP host settings show on the joiner's AMP page as read-only values and update live.
 
+### 11. Release updater and distribution
+
+Releases are published on GitHub (`rodthegod2/AMP-Community`), one zip per version containing the `MultiplayerMod` folder (same file for PC and Quest if phase 0 confirms one build runs on both; otherwise one asset per platform, named `-pc` / `-nomad`).
+
+- On game start (and from a "Check for updates" button), AMP queries `https://api.github.com/repos/rodthegod2/AMP-Community/releases/latest` (no login), compares the release tag with its own build version, and offers "Update to vX".
+- Update = download the asset into the cache, verify its SHA-256 against the checksum file attached to the release, then swap the AMP folder exactly like a mod swap (component 7): helper + relaunch on PC, in-game swap + manual restart on Quest. The previous version is kept in the cache for rollback.
+- **Installed from mod.io** (an `id.modio` file in AMP's folder): the GitHub updater stays off; mod.io's own updates apply. This keeps mod.io copies within mod.io's review process.
+- Order of precedence when joining: host self-update (component 9) wins over GitHub, so a session always runs the host's build.
+
+First install:
+
+| Player | How |
+|---|---|
+| PC | Download the release zip, copy `MultiplayerMod` into `StreamingAssets/Mods` (guide in the release notes). |
+| Quest + a PC | USB copy into the Quest's B&S `Mods` folder (guide), once. |
+| Quest, no PC | mod.io listing (optional, uploaded by the owner). Possible one-time wait if Blade & Sorcery's Android platform is moderated on mod.io. |
+
+Netamite has no license; releases that include modified Netamite DLLs need the Netamite author's permission or a license first. Until then, releases can ship the official Netamite DLLs and the connection fixes stay in the source branch.
+
 ## Personal mods list
 
 `hostingSettings.personalMods`: folder names (case-insensitive) that joiners may keep, lack, or have in any version. Default: AMP itself and `HJ_NexusModManager`. The host's book shows a "Personal" toggle per mod. Personal mods are left alone by the planner (no Add, no Disable, no Replace) and their settings aren't synced.
@@ -245,6 +264,7 @@ In game (needs the user):
 2. **Settings sync.** Mod options + AMP host settings, live UI, locking, restore on leave. Independent of downloads, so it can ship early.
 3. **PC↔PC delivery.** Host transfer, cache, journal, helper restart/rejoin, multiplayer profile, Temporary restore, AMP self-update on PC.
 4. **Quest.** mod.io delivery, Nexus→mod.io matcher with host confirmation, Quest apply/restart path, AMP self-update on Quest if phase 0 allows.
+4b. **Release updater + publishing.** GitHub release pipeline (zip + checksum), in-game updater, install guides.
 5. **Later (not in v1).** Dedicated server with a mod folder; Quest hosting.
 
 ## Out of scope for v1
