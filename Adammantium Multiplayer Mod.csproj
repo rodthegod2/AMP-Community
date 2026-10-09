@@ -240,6 +240,8 @@
     <Compile Include="Network\Packets\Implementation\MagicThrowPacket.cs" />
     <Compile Include="ModSync\ModEntry.cs" />
     <Compile Include="ModSync\ModInventory.cs" />
+    <Compile Include="ModSync\HostModSet.cs" />
+    <Compile Include="ModSync\SyncPlanner.cs" />
     <Compile Include="Network\Packets\Implementation\ItemSpawnPacket.cs" />
     <Compile Include="Network\Packets\Implementation\LevelChangePacket.cs" />
     <Compile Include="Network\Packets\Implementation\CreatureSpawnPacket.cs" />
