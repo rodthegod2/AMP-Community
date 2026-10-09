@@ -21,13 +21,18 @@ namespace AMP.Network.Packets.Implementation {
         }
 
         public override bool ProcessClient(NetamiteClient client) {
-            if(owning && !ModManager.clientSync.syncData.owningCreatures.Contains(creatureId)) ModManager.clientSync.syncData.owningCreatures.Add(creatureId);
-            if(!owning && ModManager.clientSync.syncData.owningCreatures.Contains(creatureId)) ModManager.clientSync.syncData.owningCreatures.Remove(creatureId);
-            
-            if(ModManager.clientSync.syncData.creatures.ContainsKey(creatureId)) {
-                ModManager.clientSync.syncData.creatures[creatureId].SetOwnership(owning, staticOwner);
-            }
-            
+            // owningCreatures is a plain List read every frame by NetworkCreature, so it may only change on the main thread
+            Dispatcher.Enqueue(() => {
+                if(ModManager.clientSync == null) return;
+                var syncData = ModManager.clientSync.syncData;
+
+                if(owning && !syncData.owningCreatures.Contains(creatureId)) syncData.owningCreatures.Add(creatureId);
+                if(!owning) syncData.owningCreatures.Remove(creatureId);
+
+                if(syncData.creatures.TryGetValue(creatureId, out var cnd)) {
+                    cnd.SetOwnership(owning, staticOwner);
+                }
+            });
             return true;
         }
 

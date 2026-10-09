@@ -34,9 +34,12 @@ namespace AMP.Network.Packets.Implementation {
 
 
         public override bool ProcessClient(NetamiteClient client) {
-            if(ModManager.clientSync.syncData.entities.ContainsKey(entityId)) {
-                ModManager.clientSync.syncData.entities[entityId].networkEntity.HandleEntityStateChange(this);
-            }
+            AMP.Threading.Dispatcher.Enqueue(() => { // Golem abilities spawn GameObjects
+                if(ModManager.clientSync == null) return;
+                if(ModManager.clientSync.syncData.entities.TryGetValue(entityId, out var entity)) {
+                    entity.networkEntity?.HandleEntityStateChange(this);
+                }
+            });
             return true;
         }
 

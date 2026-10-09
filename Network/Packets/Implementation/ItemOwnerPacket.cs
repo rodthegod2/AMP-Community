@@ -19,16 +19,19 @@ namespace AMP.Network.Packets.Implementation {
         }
 
         public override bool ProcessClient(NetamiteClient client) {
-            if(owning && !ModManager.clientSync.syncData.owningItems.Contains(itemId)) ModManager.clientSync.syncData.owningItems.Add(itemId);
-            if(!owning && ModManager.clientSync.syncData.owningItems.Contains(itemId)) ModManager.clientSync.syncData.owningItems.Remove(itemId);
+            // owningItems is a plain List read every frame by NetworkItem, so it may only change on the main thread
+            Dispatcher.Enqueue(() => {
+                if(ModManager.clientSync == null) return;
+                var syncData = ModManager.clientSync.syncData;
 
-            if(ModManager.clientSync.syncData.items.ContainsKey(itemId)) {
-                Dispatcher.Enqueue(() => {
-                    ModManager.clientSync.syncData.items[itemId].SetOwnership(owning);
+                if(owning && !syncData.owningItems.Contains(itemId)) syncData.owningItems.Add(itemId);
+                if(!owning) syncData.owningItems.Remove(itemId);
 
-                    if(owning) ModManager.clientSync.syncData.items[itemId].networkItem?.OnHoldStateChanged();
-                });
-            }
+                if(syncData.items.TryGetValue(itemId, out var ind)) {
+                    ind.SetOwnership(owning);
+                    if(owning) ind.networkItem?.OnHoldStateChanged();
+                }
+            });
             return true;
         }
 

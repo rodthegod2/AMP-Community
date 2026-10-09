@@ -30,16 +30,19 @@ namespace AMP.Network.Packets.Implementation {
 
 
         public override bool ProcessClient(NetamiteClient client) {
-            ModManager.clientSync.syncData.server_config = this;
-
-            if(ModManager.clientSync != null) {
-                ModManager.clientSync.UpdateVoiceChatState();
-            }
-
             Log.Debug($"Serverinfo received:\nVersion: {version}\nMax Players: {max_players}\nVoice Chat allowed: {allow_voicechat}");
 
-            if(!version.Equals(Defines.MOD_VERSION)) {
-                Dispatcher.Enqueue(() => {
+            // Voice start/stop creates and destroys GameObjects and Discord isn't thread safe, so all of this runs on the main thread
+            Dispatcher.Enqueue(() => {
+                if(ModManager.clientSync == null) return;
+                ModManager.clientSync.syncData.server_config = this;
+
+                Config.BASE_TICK_RATE   = Mathf.Clamp(base_tickrate,   1, 60); // 0 would divide by zero in the sync loops
+                Config.PLAYER_TICK_RATE = Mathf.Clamp(player_tickrate, 1, 60);
+
+                ModManager.clientSync.UpdateVoiceChatState();
+
+                if(!version.Equals(Defines.MOD_VERSION)) {
                     TextDisplay.ShowTextDisplay(new DisplayTextPacket("version_mismatch"
                                                                      , $"Your mod version is different from the servers.\nServer: {version}\nYours: {Defines.MOD_VERSION}\nEXPECT ISSUES!\nYou have been warned."
                                                                      , Color.red
@@ -48,12 +51,10 @@ namespace AMP.Network.Packets.Implementation {
                                                                      , true
                                                                      , 20
                                                                      ).SetTextSize(300));
-                });
-            }
+                }
 
-            Config.BASE_TICK_RATE = Mathf.Clamp(base_tickrate, 1, 60); // 0 would divide by zero in the sync loops
-
-            DiscordIntegration.Instance.UpdateActivity();
+                DiscordIntegration.Instance.UpdateActivity();
+            });
             return true;
         }
     }

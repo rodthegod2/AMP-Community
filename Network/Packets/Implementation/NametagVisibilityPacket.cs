@@ -1,5 +1,6 @@
 ﻿using AMP.GameInteraction;
 using AMP.Network.Data;
+using AMP.Threading;
 using Netamite.Client.Definition;
 using Netamite.Network.Packet;
 using Netamite.Network.Packet.Attributes;
@@ -23,15 +24,17 @@ namespace AMP.Network.Packets.Implementation {
         }
 
         public override bool ProcessClient(NetamiteClient client) {
-            if(affected_players != null && affected_players.Length > 0) {
-                foreach(var player in affected_players) {
-                    HealthbarObject.SetHealthBarVisible(player, is_visible);
-                    HealthbarObject.SetNameTagVisible(player, is_visible);
+            Dispatcher.Enqueue(() => { // Healthbars are UI objects
+                if(affected_players != null && affected_players.Length > 0) {
+                    foreach(var player in affected_players) {
+                        HealthbarObject.SetHealthBarVisible(player, is_visible);
+                        HealthbarObject.SetNameTagVisible(player, is_visible);
+                    }
+                } else {
+                    HealthbarObject.SetHealthBarVisible(-1, is_visible);
+                    HealthbarObject.SetNameTagVisible(-1, is_visible);
                 }
-            } else {
-                HealthbarObject.SetHealthBarVisible(-1, is_visible);
-                HealthbarObject.SetNameTagVisible(-1, is_visible);
-            }
+            });
 
             return true;
         }

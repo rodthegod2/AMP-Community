@@ -44,9 +44,8 @@ namespace AMP {
         [ModOption("Enable Voice Chat", saveValue = true)]
         public static void EnableVoiceChat(bool enable = false) {
             _EnableVoiceChat = enable;
-            
-            ModManager.safeFile.hostingSettings.allowVoiceChat = enable;
 
+            // Only your own voice; whether a hosted server allows voice is hostingSettings.allowVoiceChat in config.json
             if(ModManager.clientSync != null) {
                 ModManager.clientSync.UpdateVoiceChatState();
             }
