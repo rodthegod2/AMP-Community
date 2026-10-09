@@ -20,6 +20,7 @@ namespace AMP.ModSync {
             if(!Directory.Exists(modsPath)) return result;
 
             HashCache cache = HashCache.Load(Path.Combine(cacheDir, HashCacheFile));
+            bool completed = false;
             try {
                 foreach(string dir in Directory.GetDirectories(modsPath).OrderBy(d => d, StringComparer.OrdinalIgnoreCase)) {
                     try {
@@ -32,8 +33,9 @@ namespace AMP.ModSync {
                         // a folder that vanished or can't be read is skipped, never hashed partially
                     }
                 }
+                completed = true;
             } finally {
-                cache.Save(hashAll);
+                cache.Save(hashAll && completed);
             }
             return result;
         }
@@ -94,6 +96,8 @@ namespace AMP.ModSync {
                 return 0;
             } catch(OverflowException) {
                 return 0;
+            } catch(InvalidCastException) {
+                return 0; // ids too big for a long are stored as BigInteger and can't be read as one
             }
         }
 

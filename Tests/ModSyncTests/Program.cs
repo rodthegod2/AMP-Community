@@ -80,6 +80,17 @@ internal static class Program {
             Directory.Delete(legacy, true);
             ModInventory.Scan(f.Mods, f.Cache, true);
             T("deleted mod folder is dropped from the hash cache", !File.ReadAllText(cachePath).Contains("Legacy"));
+
+            string huge = f.Mod("HugeId");
+            File.WriteAllText(Path.Combine(huge, "id.modio"), "{\"id\":123456789012345678901234567890}");
+            ModEntry hugeMod = null;
+            Exception hugeError = null;
+            try {
+                hugeMod = ModInventory.Scan(f.Mods, f.Cache, true).FirstOrDefault(m => m.folder == "HugeId");
+            } catch(Exception e) {
+                hugeError = e;
+            }
+            T("id too big for a long gives id 0 and the scan doesn't throw", hugeError == null && hugeMod != null && hugeMod.modioId == 0);
         }
     }
 
