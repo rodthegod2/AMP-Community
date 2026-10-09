@@ -28,24 +28,17 @@ namespace AMP.Network.Packets.Implementation {
         }
 
         public override bool ProcessClient(NetamiteClient client) {
-            CreatureNetworkData cnd = null;
-            if(ModManager.clientSync.syncData.creatures.ContainsKey(creatureId)) {
-                cnd = ModManager.clientSync.syncData.creatures[creatureId];
-            } else if(ModManager.clientSync.syncData.creatures.ContainsKey(-creatureId)) {
-                cnd = ModManager.clientSync.syncData.creatures[-creatureId];
-            }
+            // Look the creature up on the main thread too: spawns register there, so a despawn right behind its spawn would otherwise miss it
+            Dispatcher.Enqueue(() => {
+                if(ModManager.clientSync == null) return;
+                var creatures = ModManager.clientSync.syncData.creatures;
+                if(!creatures.TryRemove(creatureId, out CreatureNetworkData cnd) && !creatures.TryRemove(-creatureId, out cnd)) return;
 
-            if(cnd != null) {
                 if(cnd.creature != null) {
-                    Dispatcher.Enqueue(() => {
-                        if(cnd.creature != null) {
-                            cnd.creature.Despawn();
-                        }
-                        ClientSync.PrintAreaStuff("Creature 1");
-                    });
+                    cnd.creature.Despawn();
+                    ClientSync.PrintAreaStuff("Creature 1");
                 }
-                ModManager.clientSync.syncData.creatures.TryRemove(creatureId, out _);
-            }
+            });
             return true;
         }
 

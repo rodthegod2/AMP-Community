@@ -114,37 +114,11 @@ namespace AMP.Network.Client.NetworkComponents {
             itemNetworkData.clientsideItem.OnDespawnEvent += Item_OnDespawnEvent;
             itemNetworkData.clientsideItem.OnTelekinesisGrabEvent += Item_OnTelekinesisGrabEvent;
             
-            for(int i = 0; i < itemNetworkData.clientsideItem.imbues.Count; i++) {
-                Imbue imbue = itemNetworkData.clientsideItem.imbues[i];
-                int index = i;
-                
-                imbue.OnImbueEnergyFilled += (imb, spellData, amount, change, eventTime) => {
-                    if(itemNetworkData.networkedId <= 0) return;
-                    if(lastImbueUpdate > Time.time - 0.25) return;
-                    
-                    if(spellData != null && eventTime == EventTime.OnStart) {
-                        new ItemImbuePacket(itemNetworkData.networkedId, spellData.id, index, amount + change).SendToServerReliable();
-                        lastImbueUpdate = Time.time;
-                    }
-                };
-                imbue.OnImbueEnergyDrained += (imb, spellData, amount, change, eventTime) => {
-                    if(itemNetworkData.networkedId <= 0) return;
-                    if(lastImbueUpdate > Time.time - 0.25) return;
-                    
-                    if(spellData != null && eventTime == EventTime.OnStart) {
-                        new ItemImbuePacket(itemNetworkData.networkedId, spellData.id, index, amount + change).SendToServerReliable();
-                        lastImbueUpdate = Time.time;
-                    }
-                };
-                imbue.OnImbueSpellChange += (imb, spellData, amount, change, eventTime) => {
-                    if(itemNetworkData.networkedId <= 0) return;
-                    if(lastImbueUpdate > Time.time - 0.25) return;
-                    
-                    if(spellData != null && eventTime == EventTime.OnEnd) {
-                        new ItemImbuePacket(itemNetworkData.networkedId, spellData.id, index, amount + change).SendToServerReliable();
-                        lastImbueUpdate = Time.time;
-                    }
-                };
+            // Named handlers so UnregisterEvents can remove them, lambdas piled up on every re-enable
+            foreach(Imbue imbue in itemNetworkData.clientsideItem.imbues) {
+                imbue.OnImbueEnergyFilled  += Imbue_OnEnergyChanged;
+                imbue.OnImbueEnergyDrained += Imbue_OnEnergyChanged;
+                imbue.OnImbueSpellChange   += Imbue_OnSpellChange;
             }
             
             foreach(Handle handle in itemNetworkData.clientsideItem.handles) {
@@ -161,6 +135,26 @@ namespace AMP.Network.Client.NetworkComponents {
             registeredEvents = true;
         }
         
+        private void Imbue_OnEnergyChanged(Imbue imbue, SpellCastCharge spellData, float amount, float change, EventTime eventTime) {
+            if(eventTime == EventTime.OnStart) SendImbue(imbue, spellData, amount + change);
+        }
+
+        private void Imbue_OnSpellChange(Imbue imbue, SpellCastCharge spellData, float amount, float change, EventTime eventTime) {
+            if(eventTime == EventTime.OnEnd) SendImbue(imbue, spellData, amount + change);
+        }
+
+        private void SendImbue(Imbue imbue, SpellCastCharge spellData, float energy) {
+            if(itemNetworkData.networkedId <= 0) return;
+            if(lastImbueUpdate > Time.time - 0.25) return;
+            if(spellData == null) return;
+
+            int index = itemNetworkData.clientsideItem.imbues.IndexOf(imbue);
+            if(index < 0) return;
+
+            new ItemImbuePacket(itemNetworkData.networkedId, spellData.id, index, energy).SendToServerReliable();
+            lastImbueUpdate = Time.time;
+        }
+
         private void Handle_SlidingStateChange(RagdollHand ragdollHand, bool sliding, Handle handle, float position, EventTime eventTime) {
             if(eventTime == EventTime.OnStart) return;
             if(!IsSending()) return;
@@ -181,12 +175,27 @@ namespace AMP.Network.Client.NetworkComponents {
             
             itemNetworkData.clientsideItem.OnDespawnEvent -= Item_OnDespawnEvent;
             itemNetworkData.clientsideItem.OnTelekinesisGrabEvent -= Item_OnTelekinesisGrabEvent;
-            
+
+            foreach(Imbue imbue in itemNetworkData.clientsideItem.imbues) {
+                imbue.OnImbueEnergyFilled  -= Imbue_OnEnergyChanged;
+                imbue.OnImbueEnergyDrained -= Imbue_OnEnergyChanged;
+                imbue.OnImbueSpellChange   -= Imbue_OnSpellChange;
+            }
+
             foreach(Handle handle in itemNetworkData.clientsideItem.handles) {
                 handle.SlidingStateChange -= Handle_SlidingStateChange;
             }
-            
+
             registeredEvents = false;
+        }
+
+        // Leaving a session destroys this component; give the item back its normal physics so it doesn't stay frozen in the air
+        private void OnDestroy() {
+            if(item == null || item.physicBody == null) return;
+
+            if(item.holder == null && !item.IsHanded()) item.physicBody.isKinematic = isKinematicItem;
+            item.physicBody.useGravity = true;
+            item.DisallowDespawn = item.data != null && item.data.type == ItemData.Type.Prop;
         }
         #endregion
         

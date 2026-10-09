@@ -161,6 +161,12 @@ namespace AMP.GameInteraction {
                 ModManager.clientSync.StartCoroutine(creatureData.SpawnCoroutine(position, rotationY, ModManager.instance.transform, callback: (creature) => {
                     creature.LoadCoroutine(creatureData);
 
+                    // A despawn can arrive while the creature is still loading, then nobody wants it anymore
+                    if(ModManager.clientSync == null || !ModManager.clientSync.syncData.creatures.Values.Contains(creatureSync)) {
+                        creature.Despawn();
+                        return;
+                    }
+
                 //ModManager.clientSync.StartCoroutine(creatureData.SpawnCoroutine(position, rotationY, ModManager.instance.transform, pooled: false, result: (creature) => { // Not used anymore as this will call the on spawn event
                     creatureSync.creature = creature;
 
@@ -252,6 +258,12 @@ namespace AMP.GameInteraction {
 
                 itemData.SpawnAsync((item) => {
                     if(item == null) return;
+
+                    // A despawn can arrive while the item is still loading, then nobody wants it anymore
+                    if(ModManager.clientSync == null || !ModManager.clientSync.syncData.items.Values.Contains(itemNetworkData)) {
+                        item.Despawn();
+                        return;
+                    }
                     //if(ModManager.clientSync.syncData.items.ContainsKey(itemSync.networkedId) && ModManager.clientSync.syncData.items[itemSync.networkedId].clientsideItem != item) {
                     //    item.Despawn();
                     //    return;

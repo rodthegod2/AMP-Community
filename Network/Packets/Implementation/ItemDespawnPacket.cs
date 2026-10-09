@@ -28,20 +28,17 @@ namespace AMP.Network.Packets.Implementation {
         }
 
         public override bool ProcessClient(NetamiteClient client) {
-            if(ModManager.clientSync.syncData.items.ContainsKey(itemId)) {
-                ItemNetworkData ind = ModManager.clientSync.syncData.items[itemId];
+            // Look the item up on the main thread too: spawns register there, so a despawn right behind its spawn would otherwise miss it
+            Dispatcher.Enqueue(() => {
+                if(ModManager.clientSync == null) return;
+                if(!ModManager.clientSync.syncData.items.TryRemove(itemId, out ItemNetworkData ind)) return;
 
-                Dispatcher.Enqueue(() => {
-                    if(ind.clientsideItem != null) {
-                        ind.networkItem.lastTime = (int) Time.time;
-                        if(ind.clientsideItem != null) {
-                            ind.clientsideItem.Despawn();
-                        }
-                        ClientSync.PrintAreaStuff("Item 3");
-                    }
-                    ModManager.clientSync.syncData.items.TryRemove(itemId, out _);
-                });
-            }
+                if(ind.clientsideItem != null) {
+                    if(ind.networkItem != null) ind.networkItem.lastTime = (int) Time.time;
+                    ind.clientsideItem.Despawn();
+                    ClientSync.PrintAreaStuff("Item 3");
+                }
+            });
             return true;
         }
 

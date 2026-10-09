@@ -106,15 +106,13 @@ namespace AMP.Network.Packets.Implementation {
                     exisitingSync.StartNetworking();
                 });
             } else { // Item has been spawned by other player or already existed in session
-                if(ModManager.clientSync.syncData.items.ContainsKey(itemId)) {
-                    //Spawner.TrySpawnItem(ModManager.clientSync.syncData.items[itemSpawnPacket.itemId]);
-                    return true;
-                }
-
                 ItemNetworkData ind = new ItemNetworkData();
                 ind.Apply(this);
 
                 Dispatcher.Enqueue(() => {
+                    // Checked here and not on the network thread, so two spawns for the same id (join snapshot + live broadcast) can't both pass
+                    if(ModManager.clientSync == null || !ModManager.clientSync.syncData.items.TryAdd(ind.networkedId, ind)) return;
+
                     ThunderRoad.Item item_found = SyncFunc.DoesItemAlreadyExist(ind, ThunderRoad.Item.allActive);
 
                     if(item_found == null) {
@@ -127,7 +125,6 @@ namespace AMP.Network.Packets.Implementation {
 
                         ind.StartNetworking();
                     }
-                    ModManager.clientSync.syncData.items.TryAdd(ind.networkedId, ind);
                 });
             }
             return true;
