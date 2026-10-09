@@ -14,6 +14,7 @@ internal static class Program {
     private static int Main() {
         InventoryTests();
         PlannerTests();
+        ChunkTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -125,5 +126,23 @@ internal static class Program {
 
         string text = missing.Describe();
         T("summary names the mod and size", text.Contains("B") && text.Contains("1 MB"));
+    }
+
+    private static void ChunkTests() {
+        string big = new string('x', MessageChunks.MaxChars * 2 + 10);
+        var parts = MessageChunks.Split(big);
+        T("long text splits into 3 parts", parts.Count == 3 && parts.All(p => p.Length <= MessageChunks.MaxChars));
+        T("short text is one part", MessageChunks.Split("hi").Count == 1);
+        T("empty text is one empty part", MessageChunks.Split("").Count == 1 && MessageChunks.Split("")[0] == "");
+
+        string emoji = new string('y', MessageChunks.MaxChars - 1) + "\U0001F600" + "z";
+        var emojiParts = MessageChunks.Split(emoji);
+        T("surrogate pairs are never split", emojiParts.All(p => p.Length == 0 || !char.IsHighSurrogate(p[p.Length - 1])) && string.Concat(emojiParts) == emoji);
+
+        var assembler = new MessageAssembler();
+        T("incomplete message returns null", assembler.Add("k", 1, 3, parts[1]) == null && assembler.Add("k", 2, 3, parts[2]) == null);
+        T("out-of-order parts reassemble", assembler.Add("k", 0, 3, parts[0]) == big);
+        T("separate keys don't mix", assembler.Add("a", 0, 2, "1") == null && assembler.Add("b", 0, 1, "solo") == "solo" && assembler.Add("a", 1, 2, "2") == "12");
+        T("nonsense part numbers are ignored", assembler.Add("bad", 5, 2, "x") == null && assembler.Add("bad", 0, 0, "x") == null);
     }
 }
