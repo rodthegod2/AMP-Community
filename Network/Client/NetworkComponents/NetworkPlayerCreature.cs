@@ -59,8 +59,10 @@ namespace AMP.Network.Client.NetworkComponents {
                     audioSource = ModManager.clientSync?.voiceClient?.GetAudioPlayer(playerNetworkData.clientId);
                     if(audioSource) {
                         audioSource.Start();
-                        audioSource.gameObject.transform.parent = playerNetworkData.creature.transform;
-                        
+                        // Not parented to the avatar: despawning the avatar on a level change destroyed the voice object,
+                        // and Netamite kept handing out the destroyed one. It follows the avatar in ManagedUpdate instead.
+                        DontDestroyOnLoad(audioSource.gameObject);
+
                         UpdateAudioSource();
                     }
                 }
@@ -80,8 +82,14 @@ namespace AMP.Network.Client.NetworkComponents {
             RegisterEvents();
 
             if (ModLoader._EnableVoiceChat) {
-                Log.Debug($"Enable Audio Source for {playerNetworkData.clientId} " + AudioSource.name);
-                UpdateAudioSource();
+                try { // A voice problem must not abort the rest of the player spawn (nametag, equipment, height)
+                    if(AudioSource != null) {
+                        Log.Debug($"Enable Audio Source for {playerNetworkData.clientId} " + AudioSource.name);
+                        UpdateAudioSource();
+                    }
+                } catch(Exception e) {
+                    Log.Err(Defines.CLIENT, $"Voice setup for player {playerNetworkData.clientId} failed: {e.Message}");
+                }
             }
         }
 
@@ -99,6 +107,10 @@ namespace AMP.Network.Client.NetworkComponents {
             //slowmo = playerNetworkData.health == 0;
 
             base.ManagedUpdate();
+
+            if(audioSource && playerNetworkData.creature != null) {
+                audioSource.transform.position = playerNetworkData.creature.transform.position + Vector3.up * playerNetworkData.creature.GetHeight();
+            }
 
             //Log.Info("NetworkPlayerCreature");
 
