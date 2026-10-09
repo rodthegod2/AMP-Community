@@ -702,13 +702,13 @@ namespace AMP.UI {
             btn.onClick.AddListener(() => {
                 switch (currentJoinIpSelection) {
                     case JoinIpSelection.Address:
-                        joinIpAddress.text = joinIpAddress.text.Remove(joinIpAddress.text.Length - 1);
+                        if(joinIpAddress.text.Length > 0) joinIpAddress.text = joinIpAddress.text.Remove(joinIpAddress.text.Length - 1);
                         break;
                     case JoinIpSelection.Port:
-                        joinIpPort.text = joinIpPort.text.Remove(joinIpPort.text.Length - 1);
+                        if(joinIpPort.text.Length > 0) joinIpPort.text = joinIpPort.text.Remove(joinIpPort.text.Length - 1);
                         break;
                     case JoinIpSelection.Password:
-                        joinIpPassword.text = joinIpPassword.text.Remove(joinIpPassword.text.Length - 1);
+                        if(joinIpPassword.text.Length > 0) joinIpPassword.text = joinIpPassword.text.Remove(joinIpPassword.text.Length - 1);
                         break;
                 }
             });
@@ -2419,7 +2419,7 @@ namespace AMP.UI {
             serverJoinCodeLabel.gameObject.SetActive(false);
             serverJoinCodeMessage.gameObject.SetActive(false);
 #if AMP
-            GUIManager.JoinServer(currentInfo.address, currentInfo.port.ToString());
+            GUIManager.JoinServer(currentInfo.address, currentInfo.port.ToString(), save_cache: false); // keep the saved Direct (IP) details
 #endif
         }
 #if STEAM

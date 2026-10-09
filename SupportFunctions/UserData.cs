@@ -25,6 +25,15 @@ namespace AMP.SupportFunctions {
         
         public static async Task<UserData> CreateAsync() {
             string name = null;
+            if (!string.IsNullOrWhiteSpace(ModManager.safeFile.customName)) {
+                string customName = ModManager.safeFile.customName.Trim();
+                name = SanitizeName(customName.Length > 32 ? customName.Substring(0, 32) : customName);
+                if (name.Length > 0) {
+                    Log.Debug(Defines.AMP, $"Using custom name: {name}");
+                    return new UserData(name);
+                }
+            }
+
             var safeFileUsername = ModManager.safeFile.username;
             if (safeFileUsername.Equals(FALLBACK_NAME) || string.IsNullOrEmpty(safeFileUsername) || ModManager.safeFile.lastNameRead < TimeHelper.Millis - TimeHelper.DAY) {
                 if (DiscordIntegration.Instance != null && !DiscordIntegration.Instance.currentUser.Equals(default(User))) {

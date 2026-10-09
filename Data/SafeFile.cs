@@ -11,6 +11,8 @@ namespace AMP.Data {
 
         #region Values
         public string username = "";
+        // Set this to always play under your own name; "username" is filled automatically and refreshed daily
+        public string customName = "";
 
         public long lastNameRead = 0;
 

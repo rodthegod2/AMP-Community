@@ -158,7 +158,8 @@ namespace AMP.Network.Client {
                         SendMyPos();
                     }
                 } else {
-                    Log.Err("No player creature found.");
+                    // Normal while dead or loading; this loop runs up to 30 times a second, so it must not spam the log
+                    Log.Debug("No player creature found.");
                 }
             }
         }
