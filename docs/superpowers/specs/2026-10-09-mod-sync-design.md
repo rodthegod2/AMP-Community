@@ -205,7 +205,7 @@ First install:
 | Quest + a PC | USB copy into the Quest's B&S `Mods` folder (guide), once. |
 | Quest, no PC | mod.io listing (optional, uploaded by the owner). Possible one-time wait if Blade & Sorcery's Android platform is moderated on mod.io. |
 
-Netamite has no license; releases that include modified Netamite DLLs need the Netamite author's permission or a license first. Until then, releases can ship the official Netamite DLLs and the connection fixes stay in the source branch.
+Netamite has no license. Decision (owner, 2026-10-09): releases ship our modified Netamite DLLs; the Netamite author is credited in the release notes and asked/added once reachable.
 
 ## Personal mods list
 
