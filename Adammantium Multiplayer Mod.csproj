@@ -243,6 +243,8 @@
     <Compile Include="ModSync\HostModSet.cs" />
     <Compile Include="ModSync\SyncPlanner.cs" />
     <Compile Include="ModSync\MessageChunks.cs" />
+    <Compile Include="ModSync\ModSyncClient.cs" />
+    <Compile Include="ModSync\ModSyncHost.cs" />
     <Compile Include="Network\Packets\Implementation\ItemSpawnPacket.cs" />
     <Compile Include="Network\Packets\Implementation\LevelChangePacket.cs" />
     <Compile Include="Network\Packets\Implementation\CreatureSpawnPacket.cs" />
@@ -251,6 +253,7 @@
     <Compile Include="Network\Packets\Implementation\ClearPacket.cs" />
     <Compile Include="Network\Packets\Implementation\AllowTransmissionPacket.cs" />
     <Compile Include="Network\Packets\Implementation\ModListPacket.cs" />
+    <Compile Include="Network\Packets\Implementation\ModSyncPacket.cs" />
     <Compile Include="Network\Packets\Implementation\PlayerTeleportPacket.cs" />
     <Compile Include="Network\Packets\Implementation\PrepareLevelChangePacket.cs" />
     <Compile Include="Network\Packets\Implementation\ServerInfoPacket.cs" />

@@ -52,6 +52,7 @@
         MAGIC_THROW,
 
         MOD_LIST                    = 110,
+        MOD_SYNC,
         
         MODERATION_PERMISSION_LEVEL = 120,
         MODERATION_VOTE_KICK,
