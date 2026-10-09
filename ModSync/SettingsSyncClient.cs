@@ -50,6 +50,10 @@ namespace AMP.ModSync {
             if(ModManager.serverInstance != null) return; // we are the host: our own values are the host's
             if(ModManager.clientInstance == null) return;
 
+            // A backup from a crash that wasn't restored yet holds the player's real values, our current ones are the old host's
+            Dictionary<string, OptionValue> unrestored = null;
+            bool addedOriginal = false;
+
             foreach(OptionValue value in message.values) {
                 if(value == null) continue;
                 ModOption option = ModOptionBridge.Find(value.mod, value.option);
@@ -59,10 +63,13 @@ namespace AMP.ModSync {
 
                 string key = value.mod + "/" + value.option;
                 if(!originals.ContainsKey(key)) {
-                    // A backup from a crash that wasn't restored yet holds the player's real value, our current one is the old host's
-                    OptionValue unrestored = LoadBackup().FirstOrDefault(v => v.mod + "/" + v.option == key);
-                    originals[key] = unrestored ?? ModOptionBridge.Read(option);
-                    SaveBackup();
+                    if(unrestored == null) {
+                        unrestored = new Dictionary<string, OptionValue>();
+                        foreach(OptionValue old in LoadBackup()) unrestored[old.mod + "/" + old.option] = old;
+                    }
+                    OptionValue previous;
+                    originals[key] = unrestored.TryGetValue(key, out previous) ? previous : ModOptionBridge.Read(option);
+                    addedOriginal = true;
                 }
                 hostIndex[key] = index;
                 if(!handlers.ContainsKey(key)) {
@@ -73,6 +80,7 @@ namespace AMP.ModSync {
                 }
                 if(option.GetIndex(false) != index) Set(option, index);
             }
+            if(addedOriginal) SaveBackup();
         }
 
         // The player changed a host-controlled option: put the host's value back next frame
