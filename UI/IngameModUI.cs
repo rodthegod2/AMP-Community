@@ -952,8 +952,8 @@ namespace AMP.UI {
             gobj = CreateObject("Confirm");
             gobj.transform.SetParent(hostPanel);
             rect = gobj.AddComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(600, 150);
-            rect.localPosition = new Vector3(0, -325, 0);
+            rect.sizeDelta = new Vector2(400, 150);
+            rect.localPosition = new Vector3(-205, -325, 0);
             btn = gobj.AddComponent<Button>();
             btn.targetGraphic = gobj.AddComponent<Image>();
             btn.targetGraphic.color = new Color(1, 1, 1, 0.6f);
@@ -962,16 +962,42 @@ namespace AMP.UI {
             text = CreateObject("Text");
             text.transform.SetParent(btn.transform, false);
             rect = text.AddComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(600, 150);
+            rect.sizeDelta = new Vector2(400, 150);
             btnText = text.AddComponent<TextMeshProUGUI>();
             btnText.text = "Create >";
-            btnText.fontSize = 80;
+            btnText.fontSize = 70;
             btnText.fontStyle = FontStyles.Bold;
             btnText.color = Color.green;
             btnText.alignment = TextAlignmentOptions.Center;
 
             btn.onClick.AddListener(() => {
                 StartCoroutine(HostServer());
+            });
+
+            // Hosts the server inside this game instead of on a lobby server; friends join with Direct (IP)
+            gobj = CreateObject("HostLocal");
+            gobj.transform.SetParent(hostPanel);
+            rect = gobj.AddComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(400, 150);
+            rect.localPosition = new Vector3(205, -325, 0);
+            btn = gobj.AddComponent<Button>();
+            btn.targetGraphic = gobj.AddComponent<Image>();
+            btn.targetGraphic.color = new Color(1, 1, 1, 0.6f);
+            btn.colors = buttonColor;
+
+            text = CreateObject("Text");
+            text.transform.SetParent(btn.transform, false);
+            rect = text.AddComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(400, 150);
+            btnText = text.AddComponent<TextMeshProUGUI>();
+            btnText.text = "Host on PC";
+            btnText.fontSize = 60;
+            btnText.fontStyle = FontStyles.Bold;
+            btnText.color = new Color(0, 0.35f, 0.8f);
+            btnText.alignment = TextAlignmentOptions.Center;
+
+            btn.onClick.AddListener(() => {
+                StartCoroutine(HostOnThisPC());
             });
 
             /*
@@ -1554,7 +1580,7 @@ namespace AMP.UI {
                         info = $"[ Hosting Steam {Defines.FULL_MOD_VERSION} ]";
                     else
                     #endif
-                        info = $"[ Hosting Server {Defines.FULL_MOD_VERSION} ]";
+                        info = $"[ Hosting Server {Defines.FULL_MOD_VERSION} | Port {ModManager.safeFile.inputCache.host_port} | LAN IP {LocalNetworkAddress()} ]";
                 } else if(ModManager.clientInstance != null) {
                     #if STEAM
                     if(ModManager.clientInstance.netclient is SteamClient)
@@ -2374,6 +2400,11 @@ namespace AMP.UI {
             if ("SERVER_FULL".Equals(reason)) reason = "Server is full";
             else if ("WRONG_PASSWORD".Equals(reason)) reason = "Wrong password";
             else if ("SERVER_CLOSED".Equals(reason)) reason = "Server closed";
+            else if ("CONNECTION_TIMEOUT".Equals(reason)) reason = "Lost connection to the server (nothing received for 15 seconds)";
+            else if ("Connection failed.".Equals(reason) || "Connection timed out.".Equals(reason)) {
+                string address = $"{ModManager.guiManager.join_ip}:{ModManager.guiManager.join_port}";
+                reason = $"Can't reach {address}.\nCheck the address, that the host is running,\nand that TCP and UDP port {ModManager.guiManager.join_port} are forwarded (or use a VPN like Tailscale).";
+            }
             else if ("CONNECTION_CLOSED".Equals(reason)) yield break;
 
             ShowPage(Page.Connecting);
@@ -2719,10 +2750,43 @@ namespace AMP.UI {
             }
             connectingMessage.text = "Lobby creation failed, please try again later.";
             connectingMessage.color = Color.red;
-            
+
             yield return new WaitForSeconds(5);
-            
+
             ShowPage(Page.IpHosting);
+        }
+
+        // Port, password and max players come from inputCache in config.json (host_port, host_password, host_max_players)
+        private IEnumerator HostOnThisPC() {
+            ShowPage(Page.Connecting);
+            string port = ModManager.safeFile.inputCache.host_port.ToString();
+            connectingMessage.color = Color.black;
+            connectingMessage.text = $"Starting server on this PC (port {port})...";
+
+            string error = null;
+            GUIManager.HostServer(ModManager.safeFile.inputCache.host_max_players, port, ModManager.safeFile.inputCache.host_password, (e) => error = e);
+
+            // On success GUIManager joins 127.0.0.1 by itself and the connection screen takes over
+            yield return new WaitForSeconds(2);
+            if(error == null) yield break;
+
+            connectingMessage.text = $"Couldn't host on port {port}:\n{error}";
+            connectingMessage.color = Color.red;
+            yield return new WaitForSeconds(5);
+            ShowPage(Page.IpHosting);
+        }
+
+        private static string localNetworkAddress;
+        private static string LocalNetworkAddress() {
+            if(localNetworkAddress != null) return localNetworkAddress;
+            try {
+                System.Net.IPAddress address = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName()).AddressList
+                    .FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !System.Net.IPAddress.IsLoopback(a));
+                localNetworkAddress = address?.ToString() ?? "unknown";
+            } catch(Exception) {
+                localNetworkAddress = "unknown";
+            }
+            return localNetworkAddress;
         }
     }
 }
