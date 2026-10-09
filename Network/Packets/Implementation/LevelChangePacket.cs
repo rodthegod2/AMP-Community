@@ -149,6 +149,7 @@ namespace AMP.Network.Packets.Implementation {
                     server.SendToAllExcept(this, client.ClientId);
                     server.SendTo(client, new AllowTransmissionPacket(true));
 
+                    client.LoadedLevel = true; // this branch returns before the OnEnd handling below
                     ServerEvents.InvokeOnLevelChange(level, mode, option_dict);
                     return true;
                 }

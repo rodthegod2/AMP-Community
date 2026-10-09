@@ -49,7 +49,9 @@ namespace AMP.Network.Client.NetworkComponents {
             if(item.holder != null || item.isGripped || item.handlers?.Count > 0) {
                 isKinematicItem = false;
             }
+            capturedKinematic = true;
         }
+        private bool capturedKinematic = false;
         
         internal override bool IsSending() {
             return itemNetworkData != null && itemNetworkData.clientsideId > 0;
@@ -191,11 +193,12 @@ namespace AMP.Network.Client.NetworkComponents {
 
         // Leaving a session destroys this component; give the item back its normal physics so it doesn't stay frozen in the air
         private void OnDestroy() {
-            if(item == null || item.physicBody == null) return;
+            // The item itself may be getting destroyed in the same frame (non-pooled despawn)
+            if(item == null || item.physicBody == null || item.physicBody.rigidBody == null) return;
 
-            if(item.holder == null && !item.IsHanded()) item.physicBody.isKinematic = isKinematicItem;
+            if(capturedKinematic && item.holder == null && !item.IsHanded()) item.physicBody.isKinematic = isKinematicItem;
             item.physicBody.useGravity = true;
-            item.DisallowDespawn = item.data != null && item.data.type == ItemData.Type.Prop;
+            if(item.data == null || item.data.type != ItemData.Type.Prop) item.DisallowDespawn = false; // props keep whatever the level gave them
         }
         #endregion
         

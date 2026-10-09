@@ -62,6 +62,7 @@ namespace AMP.Network.Client.NetworkComponents {
                         // Not parented to the avatar: despawning the avatar on a level change destroyed the voice object,
                         // and Netamite kept handing out the destroyed one. It follows the avatar in ManagedUpdate instead.
                         DontDestroyOnLoad(audioSource.gameObject);
+                        FollowAvatar();
 
                         UpdateAudioSource();
                     }
@@ -97,6 +98,17 @@ namespace AMP.Network.Client.NetworkComponents {
             return ModManager.clientInstance != null && playerNetworkData.clientId == ModManager.clientInstance.netclient.ClientId;
         }
 
+        private void FollowAvatar() {
+            if(audioSource && playerNetworkData?.creature != null) {
+                audioSource.transform.position = playerNetworkData.creature.transform.position + Vector3.up * playerNetworkData.creature.GetHeight();
+            }
+        }
+
+        // The voice object survives level loads on its own, so it has to go when this player goes (leave / disconnect)
+        private void OnDestroy() {
+            if(audioSource) Destroy(audioSource.gameObject);
+        }
+
         protected new void OnAwake() {
             base.OnAwake();
         }
@@ -108,9 +120,7 @@ namespace AMP.Network.Client.NetworkComponents {
 
             base.ManagedUpdate();
 
-            if(audioSource && playerNetworkData.creature != null) {
-                audioSource.transform.position = playerNetworkData.creature.transform.position + Vector3.up * playerNetworkData.creature.GetHeight();
-            }
+            FollowAvatar();
 
             //Log.Info("NetworkPlayerCreature");
 
@@ -257,8 +267,6 @@ namespace AMP.Network.Client.NetworkComponents {
         }
 
         private void UpdateAudioSource() {
-            AudioSource.gameObject.transform.localPosition = new Vector3(0, playerNetworkData.height - 0.1f, 0);
-
             AudioSource.SetVolume(ModLoader._VoiceChatVolume);
             AudioSource.SetProximity(ModLoader._EnableProximityChat);
         }

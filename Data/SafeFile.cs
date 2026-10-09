@@ -16,6 +16,9 @@ namespace AMP.Data {
 
         public long lastNameRead = 0;
 
+        // Older builds wrote the personal voice toggle into hostingSettings.allowVoiceChat; reset that once
+        public bool hostVoiceSettingMigrated = false;
+
         public ModSettings     modSettings     = new ModSettings();
         public HostingSettings hostingSettings = new HostingSettings();
         public InputCache      inputCache      = new InputCache();

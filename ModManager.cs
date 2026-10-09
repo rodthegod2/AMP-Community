@@ -94,6 +94,11 @@ namespace AMP {
                 }
 
                 safeFile = SafeFile.Load(configPath);
+                if(!safeFile.hostVoiceSettingMigrated) {
+                    safeFile.hostingSettings.allowVoiceChat = true;
+                    safeFile.hostVoiceSettingMigrated = true;
+                    safeFile.Save();
+                }
                 banlist = Banlist.Load(banPath);
             } else {
                 Log.Err(Defines.AMP, $"Can't save any configs, save path not retrievable.");
