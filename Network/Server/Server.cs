@@ -127,12 +127,13 @@ namespace AMP.Network.Server {
 
                 netamiteServer.OnDisconnect += OnClientDisconnect;
                 netamiteServer.OnDataReceived += ProcessPacket;
-                netamiteServer.OnConnect += GreetPlayer;
+                netamiteServer.OnConnect += (client) => ModSync.ModSyncHost.OnClientConnected((ClientData) client);
             };
 
             netamiteServer.Start();
         }
         private void OnClientDisconnect(ClientInformation client, string reason) {
+            ModSync.ModSyncHost.OnClientDisconnected((ClientData) client);
             LeavePlayer((ClientData) client, reason);
         }
 

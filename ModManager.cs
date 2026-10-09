@@ -103,7 +103,11 @@ namespace AMP {
             } else {
                 Log.Err(Defines.AMP, $"Can't save any configs, save path not retrievable.");
             }
-            ModSync.ModSyncPaths.Init();
+            try {
+                ModSync.ModSyncPaths.Init();
+            } catch(Exception e) {
+                Log.Err(Defines.AMP, "Mod sync unavailable: " + e.Message);
+            }
             if(safeFile.modSettings.useBrowserIntegration) {
                 WebSocketInteractor.Start();
             }
@@ -295,6 +299,7 @@ namespace AMP {
         internal static void HostServer(uint maxPlayers, int port, string password, Action<string> callback) {
             StopClient();
             StopHost();
+            ModSync.ModSyncHost.Prepare();
 
             IPServer server = new IPServer("0.0.0.0", (short) port, (int) maxPlayers);
             server.ConnectToken = password;
@@ -318,6 +323,7 @@ namespace AMP {
         internal static void HostSteamServer(uint maxPlayers, Action<string> callback) {
             StopClient();
             StopHost();
+            ModSync.ModSyncHost.Prepare();
 
             SteamServer steamServer = new SteamServer((int) maxPlayers);
 

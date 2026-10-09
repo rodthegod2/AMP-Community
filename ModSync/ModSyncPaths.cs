@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using ThunderRoad;
 using UnityEngine;
@@ -9,10 +10,21 @@ namespace AMP.ModSync {
         internal static string CacheFolder { get; private set; }
         internal static string Platform    { get; private set; }
 
+        // False when Init couldn't find the Mods folder: mod sync then stays out of the way
+        internal static bool Available { get { return !string.IsNullOrEmpty(ModsFolder); } }
+
         internal static void Init() {
-            ModsFolder  = FileManager.GetFullPath(FileManager.Type.JSONCatalog, FileManager.Source.Mods);
-            CacheFolder = Path.Combine(Directory.GetParent(ModsFolder.TrimEnd('/', '\\')).FullName, "AMP_ModCache");
+            ModsFolder  = null;
+            CacheFolder = null;
             Platform    = Application.platform == RuntimePlatform.Android ? "android" : "windows";
+
+            string mods = FileManager.GetFullPath(FileManager.Type.JSONCatalog, FileManager.Source.Mods);
+            if(string.IsNullOrEmpty(mods)) throw new InvalidOperationException("the Mods folder path is empty");
+            DirectoryInfo parent = Directory.GetParent(mods.TrimEnd('/', '\\'));
+            if(parent == null) throw new InvalidOperationException("the Mods folder has no parent folder");
+
+            CacheFolder = Path.Combine(parent.FullName, "AMP_ModCache");
+            ModsFolder  = mods; // set last: Available means everything above worked
         }
     }
 }

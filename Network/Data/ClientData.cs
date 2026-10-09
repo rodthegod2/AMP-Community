@@ -24,7 +24,8 @@ namespace AMP.Network.Data {
         };
 
         internal bool greeted = false;
-        internal string modSyncState = ""; // "", "waiting", "setup", "ready" (see ModSyncHost)
+        internal volatile string modSyncState = ""; // "", "waiting", "setup", "ready", "kicked" (see ModSyncHost)
+        internal readonly object modSyncLock = new object(); // every check-then-set of modSyncState happens inside it
 
         internal PlayerNetworkData _player = null;
 
