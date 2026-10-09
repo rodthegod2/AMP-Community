@@ -326,12 +326,13 @@ namespace AMP.Network.Server {
         internal void LeavePlayer(ClientData client, string reason = "Player disconnected") {
             Log.Debug(Defines.SERVER, $"{client.ClientName} initialized a disconnect. {reason}");
 
-            if(netamiteServer.Clients.Length <= 0) {
+            // Joiners still in mod sync aren't playing yet, so they can't take over items and creatures
+            ClientInformation migrateUser = netamiteServer.Clients.FirstOrDefault(entry => entry.ClientId != client.ClientId && ModSync.ModSyncHost.IsPlaying((ClientData) entry));
+            if(migrateUser == null) {
                 ClearItemsAndCreatures();
-                Log.Info(Defines.SERVER, $"Clearing server because last player disconnected.");
+                Log.Info(Defines.SERVER, $"Clearing server because the last playing player disconnected.");
             } else {
                 try {
-                    ClientInformation migrateUser = netamiteServer.Clients.First(entry => entry.ClientId != client.ClientId && ModSync.ModSyncHost.IsPlaying((ClientData) entry));
                     try {
                         KeyValuePair<int, int>[] entries = item_owner.Where(entry => entry.Value == client.ClientId).ToArray();
 
