@@ -44,3 +44,6 @@ Discover, router model + service type, external IP class, existing-entry check (
 
 ### 5. Docs
 `docs/HOW-TO-PLAY.txt`: hosting and joining by code first; port forwarding / Tailscale as the fallback; Quest section joins by code.
+
+## Status (2026-10-10)
+Tasks 1–5 done. Headless: 77 new NAT tests in ModSyncTests (523 in total, all pass), incl. the full flow against `FakeIgd` (open, lease fallback 725 → 0, renewals with a 2 s lease, CGNAT/private/no-internet, conflict with another device, a manual forward left alone, a left-over AMP mapping taken over, PPP without GetSpecificPortMappingEntry, no router, stop while searching, hosting again). Real router (owner-approved, run once with lease 600 s): SnapAV AN-110-RT-2L1W, WANIPConnection:2, public internet address; TCP+UDP 26950 added, verified with GetSpecificPortMappingEntry (this PC, "AMP Community", lease 600), deleted, verified gone. `run-e2e.ps1 -All`: 18 PASS (new: host-joincode, host-upnp-fake, join-code). Not verified: the book UI text on a headset (the page code runs only with the book open), joining over the real internet from outside the LAN, and a Quest typing a code.
