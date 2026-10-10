@@ -261,6 +261,7 @@ namespace AMP {
             if(serverInstance != null && serverInstance.netamiteServer.IsRunning) {
                 StopHost();
             }
+            Network.Nat.HostPortMapping.Stop(); // also when the server already died without StopHost
             Network.Nat.HostPortMapping.WaitForCleanup(3000);
         }
 
