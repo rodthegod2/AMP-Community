@@ -17,6 +17,7 @@ namespace AMP.ModSync {
         public string hash   = "";   // Install: cache entry
         public bool   started;       // set (and saved) just before the change, so a crash in between can still be undone
         public bool   done;          // set by the applier once the change is on disk
+        public bool   keep;          // never undone, even by a Temporary restore (AMP's own update)
     }
 
     // Everything needed to apply and undo one mod swap, and to reconnect afterwards. Saved as AMP_ModCache/session.json.

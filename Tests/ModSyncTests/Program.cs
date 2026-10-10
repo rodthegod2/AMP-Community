@@ -273,6 +273,14 @@ internal static class Program {
         T("load order op with host order", j.ops.Any(o => o.kind == SwapOpKind.LoadOrder) && j.hostLoadOrder.SequenceEqual(new[] { "Old", "New" }));
         T("disables come before installs", j.ops.FindLastIndex(o => o.kind == SwapOpKind.Disable) < j.ops.FindIndex(o => o.kind == SwapOpKind.Install));
 
+        var ampPlan = new SyncPlan();
+        ampPlan.steps.Add(new SyncStep { action = SyncAction.Replace, hostMod = M("AMPNew", hash: new string('d', 64), amp: true), localMod = M("AMPOld", amp: true), source = "host" });
+        ampPlan.steps.Add(new SyncStep { action = SyncAction.Replace, hostMod = M("Old", hash: new string('b', 64)), localMod = M("Old"), source = "host" });
+        SwapJournal aj = JournalPlanner.Build(ampPlan, null, "h", 1, "", SwapMode.Temporary);
+        T("AMP: move-aside uses the joiner's folder, install the host's, both kept",
+            aj.ops.Any(o => o.kind == SwapOpKind.MoveAside && o.folder == "AMPOld" && o.keep) && aj.ops.Any(o => o.kind == SwapOpKind.Install && o.folder == "AMPNew" && o.keep));
+        T("other mods' ops are not kept", aj.ops.Where(o => o.folder == "Old").All(o => !o.keep));
+
         string json = j.ToJson();
         SwapJournal back = SwapJournal.FromJson(json);
         T("journal round-trips through JSON", back.ops.Count == j.ops.Count && back.mode == SwapMode.Temporary && back.id == j.id);
@@ -340,6 +348,49 @@ internal static class Program {
                 T("...and a failed rollback leaves RestorePending", stuck.state == SwapState.RestorePending);
                 JournalApplier.Restore(stuck, g.Mods, Path.Combine(g.Root, "cache"), Path.Combine(g.Root, "j"));
                 T("a restore that can't finish is counted", stuck.restoreFailures == 1 && stuck.state == SwapState.RestorePending);
+            }
+
+            using(var g = new TestFolders()) {
+                string oldAmp = g.Mod("AMPOld"); g.File_(oldAmp, "v.txt", "old-amp");
+                g.Mod("Extra");
+                string cr = Path.Combine(g.Root, "cache");
+                string hAmp = new string('e', 64);
+                Directory.CreateDirectory(Path.Combine(cr, "mods", hAmp, "content"));
+                File.WriteAllText(Path.Combine(cr, "mods", hAmp, "content", "v.txt"), "new-amp");
+                var aj = new SwapJournal { mode = SwapMode.Temporary };
+                aj.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "Extra" });
+                aj.ops.Add(new SwapOp { kind = SwapOpKind.MoveAside, folder = "AMPOld", keep = true });
+                aj.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = "AMPNew", hash = hAmp, keep = true });
+                string jd = Path.Combine(g.Root, "j");
+                T("AMP swap applies", JournalApplier.Apply(aj, g.Mods, cr, jd));
+                T("Temporary restore leaves the new AMP installed", JournalApplier.Restore(aj, g.Mods, cr, jd) && aj.state == SwapState.Restored
+                    && File.ReadAllText(Path.Combine(g.Mods, "AMPNew", "v.txt")) == "new-amp");
+                T("...the old AMP stays in old/<id>/ and the other mods are back",
+                    File.ReadAllText(Path.Combine(cr, "old", aj.id, "AMPOld", "v.txt")) == "old-amp" && !Directory.Exists(Path.Combine(g.Mods, "AMPOld")) && Directory.Exists(Path.Combine(g.Mods, "Extra")));
+                T("a second restore changes nothing", JournalApplier.Restore(aj, g.Mods, cr, jd) && Directory.Exists(Path.Combine(g.Mods, "AMPNew")));
+            }
+
+            using(var g = new TestFolders()) {
+                g.Mod("AMPOld"); g.Mod("Extra");
+                string cr = Path.Combine(g.Root, "cache");
+                string hAmp = new string('e', 64);
+                Directory.CreateDirectory(Path.Combine(cr, "mods", hAmp, "content"));
+                var aj = new SwapJournal { mode = SwapMode.Temporary };
+                aj.ops.Add(new SwapOp { kind = SwapOpKind.MoveAside, folder = "AMPOld", keep = true });
+                aj.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = "AMPNew", hash = hAmp, keep = true });
+                aj.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = "B", hash = new string('c', 64) }); // not in cache: Precheck fails nothing moved
+                T("a failed Apply moves nothing", !JournalApplier.Apply(aj, g.Mods, cr, Path.Combine(g.Root, "j")) && Directory.Exists(Path.Combine(g.Mods, "AMPOld")));
+
+                // Fails after the AMP ops ran (a locked file stops the Disable): the rollback must undo the kept ops
+                var bj = new SwapJournal { mode = SwapMode.Temporary };
+                bj.ops.Add(new SwapOp { kind = SwapOpKind.MoveAside, folder = "AMPOld", keep = true });
+                bj.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = "AMPNew", hash = hAmp, keep = true });
+                bj.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "Extra" });
+                bool applied;
+                using(new FileStream(Path.Combine(g.Mods, "Extra", "manifest.json"), FileMode.Open, FileAccess.Read, FileShare.None)) {
+                    applied = JournalApplier.Apply(bj, g.Mods, cr, Path.Combine(g.Root, "j2"));
+                }
+                T("a failed Apply rolls the AMP ops back", !applied && bj.state == SwapState.Restored && Directory.Exists(Path.Combine(g.Mods, "AMPOld")) && !Directory.Exists(Path.Combine(g.Mods, "AMPNew")));
             }
 
             CrashSafetyTests();
@@ -572,7 +623,16 @@ internal static class Program {
         T("personal mods (case-insensitive) are left alone", personal.steps.Count == 0);
 
         var ampDiff = P(Host("windows", M("A"), M("MultiplayerMod", hash: "x", amp: true)), "windows", M("A"), M("MultiplayerMod", hash: "y", amp: true));
-        T("AMP is never added, replaced or disabled", ampDiff.steps.Count == 0);
+        T("AMP: same platform gets exactly one Replace from the host", ampDiff.steps.Count == 1 && ampDiff.steps[0].action == SyncAction.Replace
+            && ampDiff.steps[0].hostMod.isAmp && ampDiff.steps[0].localMod.isAmp && ampDiff.steps[0].source == "host");
+        T("AMP update is described as the host's build", ampDiff.Describe().Contains("AMP update (host's build)"));
+        var ampSame = P(Host("windows", M("MultiplayerMod", hash: "x", amp: true)), "windows", M("MultiplayerMod", hash: "x", amp: true));
+        T("AMP: identical build gives no step", ampSame.steps.Count == 0);
+        var ampCross = P(Host("windows", M("MultiplayerMod", hash: "x", amp: true)), "android", M("MultiplayerMod", hash: "y", amp: true));
+        T("AMP: no step across platforms, but flagged", ampCross.steps.Count == 0 && ampCross.ampDiffers);
+        var ampMissing = P(Host("windows", M("MultiplayerMod", hash: "x", amp: true)), "windows");
+        T("AMP: no local AMP gives an Add", ampMissing.steps.Count == 1 && ampMissing.steps[0].action == SyncAction.Add);
+        T("AMP is never disabled", !P(Host("windows", M("A")), "windows", M("A"), M("MultiplayerMod", hash: "y", amp: true)).Of(SyncAction.Disable).Any());
         T("different AMP build is flagged", ampDiff.ampDiffers);
 
         var disabledLocal = P(Host("windows", M("A")), "windows", M("A"), M("_Off", enabled: false));

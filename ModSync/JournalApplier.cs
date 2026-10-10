@@ -51,7 +51,7 @@ namespace AMP.ModSync {
             } catch(Exception e) {
                 journal.lastError = e.Message;
                 // Back to normal only if the rollback fully worked; otherwise startup must offer "Restore my mods"
-                bool rolledBack = Undo(journal, modsFolder, cacheRoot, journalDir, true, persist);
+                bool rolledBack = Undo(journal, modsFolder, cacheRoot, journalDir, true, true, persist);
                 journal.state = rolledBack ? SwapState.Restored : SwapState.RestorePending;
                 TryPersist(persist, journal);
                 LastNote = Note(journal, cacheRoot);
@@ -64,7 +64,9 @@ namespace AMP.ModSync {
             LastNote = "";
             string unsafeReason = Validate(journal);
             if(unsafeReason != null) return Fail(journal, unsafeReason);
-            bool ok = Undo(journal, modsFolder, cacheRoot, journalDir, journal.mode == SwapMode.Temporary, persist);
+            // Kept ops (AMP's update) stay, unless that update never finished: then it is undone so AMP's folder is never left missing
+            bool keepIncomplete = journal.ops.Any(o => o.keep && !o.done);
+            bool ok = Undo(journal, modsFolder, cacheRoot, journalDir, journal.mode == SwapMode.Temporary, keepIncomplete, persist);
             if(ok) {
                 journal.state = SwapState.Restored;
             } else {
@@ -103,11 +105,12 @@ namespace AMP.ModSync {
             return null;
         }
 
-        private static bool Undo(SwapJournal journal, string modsFolder, string cacheRoot, string journalDir, bool everything, Action<SwapJournal> persist) {
+        private static bool Undo(SwapJournal journal, string modsFolder, string cacheRoot, string journalDir, bool everything, bool undoKept, Action<SwapJournal> persist) {
             bool ok = true;
             for(int i = journal.ops.Count - 1; i >= 0; i--) {
                 SwapOp op = journal.ops[i];
                 if(!op.done && !op.started) continue; // never touched
+                if(op.keep && !undoKept) continue;
                 if(!everything && (op.kind == SwapOpKind.Install || op.kind == SwapOpKind.MoveAside)) continue;
                 try {
                     UndoOne(op, journal, modsFolder, cacheRoot, journalDir);

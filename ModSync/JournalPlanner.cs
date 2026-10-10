@@ -9,9 +9,9 @@ namespace AMP.ModSync {
             foreach(SyncStep step in plan.Of(SyncAction.Disable))
                 journal.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = step.localMod.folder });
             foreach(SyncStep step in plan.Of(SyncAction.Replace))
-                journal.ops.Add(new SwapOp { kind = SwapOpKind.MoveAside, folder = step.localMod.folder });
+                journal.ops.Add(new SwapOp { kind = SwapOpKind.MoveAside, folder = step.localMod.folder, keep = step.hostMod.isAmp });
             foreach(SyncStep step in plan.Of(SyncAction.Replace).Concat(plan.Of(SyncAction.Add)))
-                journal.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = step.hostMod.folder, hash = step.hostMod.hash });
+                journal.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = step.hostMod.folder, hash = step.hostMod.hash, keep = step.hostMod.isAmp });
             if(plan.loadOrderDiffers)
                 journal.ops.Add(new SwapOp { kind = SwapOpKind.LoadOrder });
             return journal;

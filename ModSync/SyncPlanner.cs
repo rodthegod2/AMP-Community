@@ -41,7 +41,7 @@ namespace AMP.ModSync {
             if(group.Count == 0) return;
             sb.AppendLine(title + ":");
             foreach(SyncStep step in group) {
-                string line = "  " + step.Mod.name;
+                string line = "  " + (step.Mod.isAmp ? "AMP update (host's build)" : step.Mod.name);
                 if(action == SyncAction.Add || action == SyncAction.Replace) line += " (" + Megabytes(step.Mod.sizeBytes) + ")";
                 if(step.Mod.hasCode && action != SyncAction.Disable) line += " [contains code]";
                 sb.AppendLine(line);
@@ -95,6 +95,11 @@ namespace AMP.ModSync {
             ModEntry localAmp = local.FirstOrDefault(m => m != null && m.isAmp && m.enabled);
             string hostBuild  = !string.IsNullOrEmpty(host.ampBuild) ? host.ampBuild : (hostAmp != null ? hostAmp.hash : "");
             plan.ampDiffers   = !string.IsNullOrEmpty(hostBuild) && (localAmp == null || localAmp.hash != hostBuild);
+
+            // AMP updates itself from the host like a mod (PC only: builds differ per platform). Never disabled.
+            if(samePlatform && plan.ampDiffers && hostAmp != null && !string.IsNullOrEmpty(hostAmp.hash)) {
+                plan.steps.Add(new SyncStep { action = localAmp == null ? SyncAction.Add : SyncAction.Replace, hostMod = hostAmp, localMod = localAmp, source = "host" });
+            }
             return plan;
         }
 
