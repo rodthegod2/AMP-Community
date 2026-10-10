@@ -23,6 +23,10 @@ $Base      = @('InstantSloMo', '_TrueZeroEffort', 'Fascia')
 $Dummy     = 'AmpE2EDummy'
 $OldBuild  = 'C:\Projects\bns-mp\build-0.9.9'              # this code built as community version 0.9.9, for the self-update scenario
 $PvP       = @{ mod = 'MultiplayerMod'; option = 'PvP' }
+$SloMo     = 'InstantSloMo'                                  # fixture copy of the mod.io mod 2512544 (tiny, JSON only)
+$SloMoId   = 2512544
+# The player's real mod.io data (login, subscriptions, installed mod.io mods): tests isolate mod.io into the run folder, this proves it
+$ModioReal = @((Join-Path $env:LOCALAPPDATA 'mod.io\03852'), (Join-Path $env:LOCALAPPDATA 'mod.io\globalsettings.json'), (Join-Path $env:PUBLIC 'mod.io\3852'))
 
 # GameMods/BotMods: fixture folders next to MultiplayerMod (the AMP build under test, always present on both sides)
 $Scenarios = [ordered]@{
@@ -76,12 +80,36 @@ $Scenarios = [ordered]@{
                      @{ step = 'expectAmpVersion'; version = '1.0.0' }, @{ step = 'quit' })
         Expect   = @{}
     }
+    'modio-probe' = @{
+        # Read-only mod.io through the game's plugin (no login): mod info, search, download into the mod cache
+        GameMods = $Base; BotMode = 'none'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'modioGetMod'; id = $SloMoId; expectName = 'Instant Slow-mo + Silent' },
+                     @{ step = 'modioSearch'; phrase = 'Instant Slow-mo'; expectId = $SloMoId }, @{ step = 'modioDownload'; id = $SloMoId; expectFile = 'Spell_SlowTime.json'; timeout = 300 }, @{ step = 'quit' })
+        Expect   = @{}
+    }
     'join-download-temporary' = @{
         GameMods = $Base; BotMods = $Base + $Dummy; BotMode = 'host'; WaitRestore = $true
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
                      @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 300 }, @{ step = 'expectRejoined'; timeout = 300 },
                      @{ step = 'expectModFolder'; folder = $Dummy; present = $true }, @{ step = 'expectProfileActive'; active = $true }, @{ step = 'quit' })
         Expect   = @{ reports = @('needs_setup', 'ready'); served = @($Dummy); greetings = 1; lingerSec = 10 }
+    }
+    'join-modio' = @{
+        # The host's InstantSloMo came from mod.io and mod.io still serves that version: the game gets it from mod.io, never from the host
+        GameMods = @('_TrueZeroEffort', 'Fascia'); BotMods = $Base; BotMode = 'host'; WaitRestore = $true; CachedFolder = $SloMo; CachedFrom = 'modio'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
+                     @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 300 }, @{ step = 'expectRejoined'; timeout = 300 },
+                     @{ step = 'expectModFolder'; folder = $SloMo; present = $true }, @{ step = 'expectProfileActive'; active = $true }, @{ step = 'quit' })
+        Expect   = @{ reports = @('needs_setup', 'ready'); notServed = @($SloMo); greetings = 1; lingerSec = 10 }
+    }
+    'join-modio-fallback' = @{
+        # The host's copy differs from mod.io's file (an extra file): the mod.io download doesn't verify, the host sends the mod instead
+        GameMods = @('_TrueZeroEffort', 'Fascia'); BotMods = $Base; BotMode = 'host'; WaitRestore = $true; CachedFolder = $SloMo; CachedFrom = 'host'
+        BotExtraFile = "$SloMo\amp-e2e-variant.txt"
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
+                     @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 300 }, @{ step = 'expectRejoined'; timeout = 300 },
+                     @{ step = 'expectModFolder'; folder = $SloMo; present = $true }, @{ step = 'quit' })
+        Expect   = @{ reports = @('needs_setup', 'ready'); served = @($SloMo); greetings = 1; lingerSec = 10 }
     }
 }
 
@@ -95,6 +123,8 @@ function Read-Shared([string]$Path) {
         try { return (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
     } catch { return $null }
 }
+
+function Get-ModioShape { foreach ($p in $ModioReal) { if (Test-Path -LiteralPath $p -PathType Leaf) { $i = Get-Item -LiteralPath $p; "$p|$($i.Length)|$($i.LastWriteTimeUtc.Ticks)" } elseif (Test-Path -LiteralPath $p) { Get-TreeManifest $p | ForEach-Object { "$p\$_" } } else { "$p|missing" } } }
 
 function Get-CommandLine([int]$Id) { (Get-CimInstance Win32_Process -Filter "ProcessId=$Id" -ErrorAction SilentlyContinue).CommandLine }
 
@@ -163,6 +193,7 @@ function Invoke-Scenario([string]$Name) {
     if (-not (Get-Process steam -ErrorAction SilentlyContinue)) { throw 'Steam is not running' }
     Assert-Isolation $Game | ForEach-Object { Note $_ }
     Assert-RealSavesUnchanged | ForEach-Object { Note $_ }
+    $modioBefore = @(Get-ModioShape)
 
     $run = Join-Path $RunsRoot ((Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + $Name)
     $docs = Join-Path $run 'docs'
@@ -179,6 +210,7 @@ function Invoke-Scenario([string]$Name) {
     ConvertTo-Json -InputObject $x -Depth 5 | Set-Content -LiteralPath $expect -Encoding ascii
     $botMods = Join-Path $run 'bot-mods'
     if ($s.BotMode -ne 'none') { Copy-ModSet $botMods $s.BotMods }
+    if ($s.BotExtraFile) { Set-Content -LiteralPath (Join-Path $botMods $s.BotExtraFile) -Encoding ascii -Value 'AMP e2e: this copy differs from the mod.io file' }
     Note "run folder $run"
 
     $games = New-Object System.Collections.Generic.List[object]   # @{ proc; log; redirected } in start order
@@ -302,8 +334,13 @@ function Invoke-Scenario([string]$Name) {
             $state = if (Test-Path -LiteralPath $journal) { (Get-Content -Raw -LiteralPath $journal | ConvertFrom-Json).state } else { 'gone' }
             $shapeNow = @(Get-ModsShape $ModsDir)
             $modsBack = -not (Compare-Object $staged $shapeNow)
-            $cached = @(Get-ChildItem -Path (Join-Path $CacheDir 'mods\*\entry.json') -ErrorAction SilentlyContinue | Where-Object { (Get-Content -Raw $_.FullName | ConvertFrom-Json).folder -eq $Dummy })
-            $events.Add("restore: helper finished=$restored, journal=$state, Mods back to the staged set=$modsBack, $Dummy in cache=$($cached.Count -gt 0)")
+            $folder = if ($s.CachedFolder) { $s.CachedFolder } else { $Dummy }
+            $cached = @(Get-ChildItem -Path (Join-Path $CacheDir 'mods\*\entry.json') -ErrorAction SilentlyContinue | ForEach-Object { Get-Content -Raw $_.FullName | ConvertFrom-Json } | Where-Object { $_.folder -eq $folder })
+            # modioFileId > 0: the files came from mod.io; 0 or missing: from the host
+            $from = if ($cached.Count -eq 0) { 'nowhere' } elseif ($cached[0].modioFileId -gt 0) { "modio (file $($cached[0].modioFileId))" } else { 'host' }
+            $fromOk = -not $s.CachedFrom -or $from -like "$($s.CachedFrom)*"
+            $events.Add("restore: helper finished=$restored, journal=$state, Mods back to the staged set=$modsBack, $folder in cache from $from")
+            if (-not $fromOk -and -not $result.reason) { $result.reason = "$folder came from $from, expected $($s.CachedFrom)" }
             if (-not ($restored -and ($state -eq 'gone' -or $state -eq 'Restored') -and $modsBack -and $cached.Count -gt 0)) {
                 if (-not $modsBack) { Compare-Object $staged $shapeNow | Out-String | ForEach-Object { $events.Add("Mods diff: $_") } }
                 if (-not $result.reason) { $result.reason = 'the Temporary swap was not undone correctly after quitting' }
@@ -333,6 +370,9 @@ function Invoke-Scenario([string]$Name) {
         & 'C:\Projects\bns-mp\gametest\mods-restore.ps1' | ForEach-Object { Note $_ }
         if (-not ((Get-Content -LiteralPath "$Game\doorstop_config.ini") -contains 'enabled=false')) { throw 'doorstop_config.ini is NOT enabled=false - STOP' }
         Assert-RealSavesUnchanged | ForEach-Object { Note $_ }   # throws on any difference
+        $modioDiff = Compare-Object $modioBefore @(Get-ModioShape)
+        if ($modioDiff) { $modioDiff | Out-String | Write-Host; throw 'SAFETY: the real mod.io data changed during the run - STOP' }
+        Note 'real mod.io data unchanged' 
         $events | ForEach-Object { Note "  $_" }
     }
     if ($safetyProblem) { throw "SAFETY: $safetyProblem" }

@@ -5,7 +5,7 @@ using System.IO.Compression;
 using System.Linq;
 
 namespace AMP.ModSync {
-    // Unpacks a release zip downloaded from the network. Nothing is written until every entry name has been checked.
+    // Unpacks a zip downloaded from the network (an AMP release or a mod from mod.io). Nothing is written until every entry name has been checked.
     public static class ReleasePackage {
         private const int MaxEntries = 10000;
 
@@ -28,23 +28,38 @@ namespace AMP.ModSync {
             }
         }
 
+        // Extracts a whole zip into dest (created; must not exist yet). Leaves the stream open. Throws InvalidDataException for unsafe or oversized zips.
+        public static void ExtractAll(Stream zipStream, string dest, long maxBytes) {
+            using(var zip = new ZipArchive(zipStream, ZipArchiveMode.Read, true)) Extract(zip, dest, maxBytes);
+        }
+
+        // The mod folder of an extracted mod.io zip, picked the way the game installs one: manifest.json at the top means the top is the mod,
+        // otherwise the one top-level folder that has a manifest.json (zips are usually "<ModFolder>/manifest.json"). Throws InvalidDataException otherwise.
+        public static string FindModFolder(string root) {
+            if(File.Exists(Path.Combine(root, "manifest.json"))) return root;
+            string[] folders = Directory.GetDirectories(root).Where(d => File.Exists(Path.Combine(d, "manifest.json"))).ToArray();
+            if(folders.Length != 1) throw new InvalidDataException("The mod must have one folder with a manifest.json, found " + folders.Length + ".");
+            return folders[0];
+        }
+
         private static void Extract(ZipArchive zip, string dest, long maxBytes) {
-            if(zip.Entries.Count > MaxEntries) throw new InvalidDataException("The release has more than " + MaxEntries + " files.");
+            if(zip.Entries.Count > MaxEntries) throw new InvalidDataException("The zip has more than " + MaxEntries + " files.");
 
             var paths = new List<string>();
             long declared = 0;
             foreach(ZipArchiveEntry entry in zip.Entries) {
                 string path = TransferRules.NormalizeRelativePath(entry.FullName.TrimEnd('/'));
-                if(path == null) throw new InvalidDataException("The release has an unsafe file name: " + entry.FullName);
+                if(path == null) throw new InvalidDataException("The zip has an unsafe file name: " + entry.FullName);
                 paths.Add(path);
                 declared += entry.Length;
             }
-            if(declared > maxBytes) throw new InvalidDataException("The release is larger than " + maxBytes + " bytes.");
+            if(declared > maxBytes) throw new InvalidDataException("The zip is larger than " + maxBytes + " bytes.");
 
             Directory.CreateDirectory(dest);
             long written = 0;
             for(int i = 0; i < zip.Entries.Count; i++) {
                 if(zip.Entries[i].FullName.EndsWith("/")) continue; // folders are created by their files
+                if(paths[i].StartsWith("__MACOSX/")) continue;      // macOS metadata, never part of a mod
                 string target = Path.Combine(dest, paths[i].Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(target));
                 using(Stream input = zip.Entries[i].Open())
@@ -60,7 +75,7 @@ namespace AMP.ModSync {
             int read;
             while((read = input.Read(buffer, 0, buffer.Length)) > 0) {
                 written += read;
-                if(written > maxBytes) throw new InvalidDataException("The release is larger than " + maxBytes + " bytes.");
+                if(written > maxBytes) throw new InvalidDataException("The zip is larger than " + maxBytes + " bytes.");
                 output.Write(buffer, 0, read);
             }
             return written;

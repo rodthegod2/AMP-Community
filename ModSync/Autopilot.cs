@@ -151,6 +151,9 @@ namespace AMP.ModSync {
                 case "expectProfileActive": return ExpectProfileActive(step);
                 case "disconnect":          return Disconnect();
                 case "wait":                return Wait(step);
+                case "modioGetMod":         return ModioGetMod(step);
+                case "modioSearch":         return ModioSearch(step);
+                case "modioDownload":       return ModioDownload(step);
                 case "quit":                return Nothing(); // the end of the script reports DONE and quits
                 default: throw new InvalidOperationException("unknown step " + step.Name);
             }
@@ -391,6 +394,61 @@ namespace AMP.ModSync {
 
         private static IEnumerator Wait(AutopilotStep step) {
             yield return new WaitForSecondsRealtime(step.Int("seconds"));
+        }
+
+        private static string DescribeModio(ModIO.ModProfile p) {
+            ModIO.Implementation.API.Objects.Modfile file = p.modfile;
+            return p.id.id + " \"" + p.name + "\" by " + p.creator.username + ", file " + file.id + " (" + file.filename + ", " + file.filesize + " bytes, version " + file.version
+                 + "), platforms: " + string.Join(", ", (p.platforms ?? new ModIO.Implementation.API.Objects.ModPlatform[0]).Select(x => x.platform + "=" + x.modfileLive))
+                 + " -> " + ModioClient.PlatformAvailability(p);
+        }
+
+        private static IEnumerator ModioGetMod(AutopilotStep step) {
+            ModIO.ModProfile? profile = null;
+            string error = null;
+            bool answered = false;
+            ModioClient.GetMod(step.Int("id"), (p, e) => { profile = p; error = e; answered = true; });
+            while(!answered) yield return Poll;
+            if(error != null) { failure = "mod.io GetMod failed: " + error; yield break; }
+            Debug.Log(Prefix + "INFO mod.io mod " + DescribeModio(profile.Value));
+            if(profile.Value.name != step.Str("expectName")) failure = "mod.io mod " + step.Int("id") + " is \"" + profile.Value.name + "\", expected \"" + step.Str("expectName") + "\"";
+        }
+
+        private static IEnumerator ModioSearch(AutopilotStep step) {
+            System.Collections.Generic.List<ModIO.ModProfile> found = null;
+            string error = null;
+            bool answered = false;
+            ModioClient.Search(step.Str("phrase"), (list, e) => { found = list; error = e; answered = true; });
+            while(!answered) yield return Poll;
+            if(error != null) { failure = "mod.io search failed: " + error; yield break; }
+            Debug.Log(Prefix + "INFO mod.io search \"" + step.Str("phrase") + "\": " + found.Count + " results: " + string.Join("; ", found.Take(5).Select(p => p.id.id + " " + p.name)));
+            if(!found.Any(p => p.id.id == step.Int("expectId"))) failure = "the search didn't find mod " + step.Int("expectId");
+        }
+
+        // Like a cross-platform delivery: the download goes into the mod cache under its own hash, with its mod.io ids
+        private static IEnumerator ModioDownload(AutopilotStep step) {
+            if(!ModSyncPaths.Available) { failure = "the mod cache folder is unknown"; yield break; }
+            var cache = new ModCache(ModSyncPaths.CacheFolder);
+            ModioClient.DownloadResult download = null;
+            float lastLogged = -1f;
+            yield return ModioClient.Download(step.Int("id"), cache, 512L * 1024 * 1024,
+                p => { if(p - lastLogged >= 0.25f) { lastLogged = p; Debug.Log(Prefix + "INFO mod.io download " + (int) (p * 100) + "%"); } },
+                () => true, r => download = r);
+            if(download.error != null) { failure = download.error; yield break; }
+
+            string folderName = Path.GetFileName(download.folder);
+            var files = Directory.GetFiles(download.folder, "*", SearchOption.AllDirectories).Select(f => ModInventory.RelativePath(download.folder, f)).ToList();
+            Debug.Log(Prefix + "INFO mod.io file " + download.fileId + " (" + download.fileName + ", version " + download.version + ") unpacked to folder " + folderName + ": " + string.Join(", ", files));
+            var expected = new ModEntry { folder = folderName, name = folderName, modioId = step.Int("id") };
+            CacheEntry entry = cache.CommitUnverified(download.folder, expected, download.fileId);
+            ModioClient.TryDelete(download.root);
+            if(entry == null) { failure = "the download couldn't be stored in the mod cache"; yield break; }
+            string content = cache.ContentFolder(entry.hash);
+            Debug.Log(Prefix + "INFO cached as " + entry.hash + " (" + entry.sizeBytes + " bytes, modioId " + entry.modioId + ", modioFileId " + entry.modioFileId + ")");
+            if(!File.Exists(Path.Combine(content, "manifest.json"))) failure = "the cached mod has no manifest.json";
+            else if(step.Str("expectFile", null) != null && !File.Exists(Path.Combine(content, step.Str("expectFile")))) failure = "the cached mod has no " + step.Str("expectFile");
+            else if(Directory.GetFiles(content, "id.modio", SearchOption.AllDirectories).Length > 0) failure = "the cached mod has an id.modio";
+            else if(entry.modioFileId != download.fileId || entry.modioId != step.Int("id")) failure = "the cache entry doesn't record the mod.io ids";
         }
 
         #endregion

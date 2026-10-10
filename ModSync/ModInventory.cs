@@ -12,7 +12,9 @@ namespace AMP.ModSync {
     public static class ModInventory {
         // Rewritten on every mod.io update check, so it must not change a mod's hash
         // Plus OS folder metadata and logs, which appear and change without the mod changing
-        private static readonly string[] HashIgnoredFiles = { "id.modio", "Thumbs.db", "desktop.ini", ".DS_Store" };
+        private static readonly string[] HashIgnoredFiles = { "id.modio", "Thumbs.db", "desktop.ini", ".DS_Store", ModioThumbnail };
+        // Written into a mod folder by the game's mod manager when it shows the mod (not part of the mod.io download). Counted by AMP 1.0.0.
+        internal const string ModioThumbnail = "modio-thumbnail.png";
         private const string HashCacheFile = "hashcache.json";
 
         // hashAll = false skips hashing (cross-platform joiners can't compare hashes); AMP itself is always hashed
@@ -102,9 +104,10 @@ namespace AMP.ModSync {
             }
         }
 
-        internal static string HashFolder(string dir, string[] files, HashCache cache) {
+        // legacy: the rules of AMP 1.0.0, which counted modio-thumbnail.png (a 1.0.0 host's hashes and transfers include it)
+        internal static string HashFolder(string dir, string[] files, HashCache cache, bool legacy = false) {
             var lines = new StringBuilder();
-            var ordered = files.Where(IsHashedFile)
+            var ordered = files.Where(f => IsHashedFile(f) || (legacy && Path.GetFileName(f).Equals(ModioThumbnail, StringComparison.OrdinalIgnoreCase)))
                                .Select(f => new KeyValuePair<string, string>(RelativePath(dir, f), f))
                                .OrderBy(f => f.Key, StringComparer.Ordinal);
             foreach(var file in ordered) {

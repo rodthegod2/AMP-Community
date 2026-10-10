@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -29,6 +30,7 @@ internal static class Program {
         ReleasePackageTests();
         AutopilotTests();
         RelaunchTests();
+        ModioTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -974,6 +976,98 @@ internal static class Program {
     private static bool Rejected(string json, string fragment) {
         string error;
         return Parse(json, out error) == null && error != null && error.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    // mod.io delivery: unpacking a mod.io zip, the thumbnail the game writes, committing with and without the host's hash
+    private static void ModioTests() {
+        using(var f = new TestFolders()) {
+            const long max = 1 << 20;
+            string packaged = MakeZip(f, "packaged.zip", "InstantSloMo/manifest.json", "{\"Name\":\"x\"}", "InstantSloMo/Spell_SlowTime.json", "{}", "__MACOSX/InstantSloMo/._manifest.json", "junk");
+            string dest = Staging(f);
+            using(var zip = File.OpenRead(packaged)) ReleasePackage.ExtractAll(zip, dest, max);
+            string folder = ReleasePackage.FindModFolder(dest);
+            T("a packaged mod.io zip gives its one mod folder", Path.GetFileName(folder) == "InstantSloMo" && File.Exists(Path.Combine(folder, "Spell_SlowTime.json")));
+            T("__MACOSX entries are not extracted", !Directory.Exists(Path.Combine(dest, "__MACOSX")));
+
+            string flat = MakeZip(f, "flat.zip", "manifest.json", "{}", "Items/a.json", "{}");
+            string flatDest = Staging(f);
+            using(var zip = File.OpenRead(flat)) ReleasePackage.ExtractAll(zip, flatDest, max);
+            T("a zip with manifest.json at the top is the mod itself", ReleasePackage.FindModFolder(flatDest) == flatDest);
+
+            string two = MakeZip(f, "two.zip", "A/manifest.json", "{}", "B/manifest.json", "{}");
+            string twoDest = Staging(f);
+            using(var zip = File.OpenRead(two)) ReleasePackage.ExtractAll(zip, twoDest, max);
+            T("two mod folders in one zip are refused", Rejects(() => ReleasePackage.FindModFolder(twoDest)));
+            string none = MakeZip(f, "none.zip", "A/readme.txt", "x");
+            string noneDest = Staging(f);
+            using(var zip = File.OpenRead(none)) ReleasePackage.ExtractAll(zip, noneDest, max);
+            T("a zip without a manifest is refused", Rejects(() => ReleasePackage.FindModFolder(noneDest)));
+            string slip = MakeZip(f, "slip.zip", "A/manifest.json", "{}", "../../evil.json", "x");
+            string slipDest = Staging(f);
+            T("a zip-slip mod.io zip is refused before writing", Rejects(() => { using(var zip = File.OpenRead(slip)) ReleasePackage.ExtractAll(zip, slipDest, max); return ""; }) && !Directory.Exists(slipDest));
+            string big = MakeZip(f, "bigmod.zip", "A/manifest.json", new string('x', 200));
+            T("a mod.io zip over the size limit is refused", Rejects(() => { using(var zip = File.OpenRead(big)) ReleasePackage.ExtractAll(zip, Staging(f), 100); return ""; }));
+
+            // The host's copy: installed through the game's mod browser, so it has id.modio and the thumbnail the game wrote
+            string host = f.Mod("InstantSloMo");
+            f.File_(host, "Spell_SlowTime.json", "{\"slow\":1}");
+            f.File_(host, "id.modio", "{\"id\":2512544}");
+            f.File_(host, "modio-thumbnail.png", "png bytes");
+            ModEntry hostMod = ModInventory.Scan(f.Mods, f.Cache, true).Single(m => m.folder == "InstantSloMo");
+            T("the thumbnail the game writes is not transferred", !TransferRules.ListTransferFiles(host).Any(x => x.path == "modio-thumbnail.png"));
+            File.Delete(Path.Combine(host, "modio-thumbnail.png"));
+            T("...and doesn't count for the hash", ModInventory.Scan(f.Mods, f.Cache, true).Single(m => m.folder == "InstantSloMo").hash == hostMod.hash);
+
+            var cache = new ModCache(Path.Combine(f.Root, "cacheroot"));
+            Func<string, string> download = content => {
+                string staged = Path.Combine(cache.NewStagingFolder(), "x", "InstantSloMo");
+                Directory.CreateDirectory(staged);
+                File.Copy(Path.Combine(host, "manifest.json"), Path.Combine(staged, "manifest.json"));
+                File.WriteAllText(Path.Combine(staged, "Spell_SlowTime.json"), content);
+                return staged;
+            };
+            string actual;
+            CacheEntry same = cache.Commit(download("{\"slow\":1}"), hostMod, 5249788, out actual);
+            T("a mod.io download with the host's files is cached under the host's hash", same != null && same.hash == hostMod.hash && actual == hostMod.hash);
+            T("...and records the mod.io file", same != null && same.modioId == 2512544 && same.modioFileId == 5249788);
+            T("a transfer from the host records no mod.io file", cache.Find(hostMod.hash) != null && new ModCache(Path.Combine(f.Root, "c2")).Commit(download("{\"slow\":1}"), hostMod).modioFileId == 0);
+            cache.Evict(0, new string[0]);
+
+            string other = download("{\"slow\":2}");
+            T("another version is refused and deleted, its hash reported", cache.Commit(other, hostMod, 5249789, out actual) == null && !Directory.Exists(other) && actual.Length == 64 && actual != hostMod.hash);
+
+            CacheEntry quest = cache.CommitUnverified(download("{\"quest\":true}"), hostMod, 7615807);
+            T("a cross-platform download is cached under its own hash", quest != null && quest.hash != hostMod.hash && cache.Find(quest.hash) != null);
+            T("...with the host's folder and the mod.io ids", quest != null && quest.folder == "InstantSloMo" && quest.modioId == 2512544 && quest.modioFileId == 7615807);
+
+            // AMP 1.0.0 hosts counted the thumbnail and send it: their hash still has to verify
+            string legacyHost = f.Mod("Legacy");
+            f.File_(legacyHost, "a.json", "{}");
+            f.File_(legacyHost, "modio-thumbnail.png", "png");
+            string[] legacyFiles = Directory.GetFiles(legacyHost, "*", SearchOption.AllDirectories);
+            var legacyMod = new ModEntry { folder = "Legacy", name = "Legacy", hash = ModInventory.HashFolder(legacyHost, legacyFiles, HashCache.Load(Path.Combine(f.Root, "nocache.json")), true) };
+            T("the legacy hash differs from the current one", legacyMod.hash != ModInventory.HashFolder(legacyHost, legacyFiles, HashCache.Load(Path.Combine(f.Root, "nocache.json"))));
+            string received = cache.NewStagingFolder();
+            foreach(string file in legacyFiles) File.Copy(file, Path.Combine(received, Path.GetFileName(file)));
+            CacheEntry fromOld = cache.Commit(received, legacyMod);
+            T("files from an AMP 1.0.0 host verify against its hash with the thumbnail", fromOld != null && fromOld.hash == legacyMod.hash);
+            string tampered = cache.NewStagingFolder();
+            File.WriteAllText(Path.Combine(tampered, "a.json"), "{\"x\":1}");
+            File.WriteAllText(Path.Combine(tampered, "manifest.json"), File.ReadAllText(Path.Combine(legacyHost, "manifest.json")));
+            File.WriteAllText(Path.Combine(tampered, "modio-thumbnail.png"), "png");
+            T("...but other files still don't", cache.Commit(tampered, legacyMod) == null);
+
+            var avail = ModioRules.Availability(new[] { new KeyValuePair<string, long>("windows", 7615808), new KeyValuePair<string, long>("Android", 7615807), new KeyValuePair<string, long>("oculus", 0) });
+            T("platform availability from live files", avail.windows && avail.android && !avail.oculus && avail.Quest);
+            T("no platforms means nowhere", !ModioRules.Availability(null).windows && !ModioRules.Availability(new KeyValuePair<string, long>[0]).Quest);
+        }
+
+        string error;
+        var steps = AutopilotScript.Parse(@"[{""step"":""modioGetMod"",""id"":2512544,""expectName"":""Instant Slow-mo + Silent""},
+            {""step"":""modioSearch"",""phrase"":""Instant Slow-mo"",""expectId"":2512544},{""step"":""modioDownload"",""id"":2512544,""expectFile"":""Spell_SlowTime.json""},{""step"":""modioDownload"",""id"":1}]", out error);
+        T("mod.io steps parse (" + error + ")", steps != null && steps.Steps[0].Int("id") == 2512544 && steps.Steps[1].Str("phrase") == "Instant Slow-mo"
+            && steps.Steps[2].Str("expectFile", null) == "Spell_SlowTime.json" && steps.Steps[3].Str("expectFile", null) == null);
+        T("a mod.io id must be positive", AutopilotScript.Parse(@"[{""step"":""modioGetMod"",""id"":0,""expectName"":""x""}]", out error) == null);
     }
 
     private static void AutopilotTests() {

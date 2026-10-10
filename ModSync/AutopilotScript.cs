@@ -51,6 +51,9 @@ namespace AMP.ModSync {
             { "expectProfileActive", "active:bool" },
             { "disconnect",          "" },
             { "wait",                "seconds:int[0-3600]" },
+            { "modioGetMod",         "id:int[1-999999999999] expectName:string" },   // mod.io has this mod under this name
+            { "modioSearch",         "phrase:string expectId:int[1-999999999999]" }, // a mod.io search finds this mod on its first page
+            { "modioDownload",       "id:int[1-999999999999] expectFile:string?" },  // downloads the mod from mod.io into the mod cache
             { "quit",                "" },
         };
 

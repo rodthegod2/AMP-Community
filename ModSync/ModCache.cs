@@ -10,6 +10,7 @@ namespace AMP.ModSync {
         public string folder;
         public string name;
         public long   modioId;
+        public long   modioFileId;   // > 0: the files came from this mod.io file, not from the host
         public long   sizeBytes;
         public long   lastUsedTicks;
     }
@@ -37,10 +38,32 @@ namespace AMP.ModSync {
 
         // Verifies the staged files against the expected mod hash and moves them into the cache. Null (and staging deleted) on mismatch.
         public CacheEntry Commit(string stagingFolder, ModEntry expected) {
+            string actual;
+            return Commit(stagingFolder, expected, 0, out actual);
+        }
+
+        // modioFileId > 0: the staged files are that mod.io file. actualHash: what the staged files hash to (for logging a mismatch).
+        public CacheEntry Commit(string stagingFolder, ModEntry expected, long modioFileId, out string actualHash) {
+            return Store(stagingFolder, expected, modioFileId, true, out actualHash);
+        }
+
+        // A mod.io download for another platform than the host's: its files can't match the host's hash, so it is stored under its own
+        // hash (the returned entry's hash) with the mod.io ids. Null (and staging deleted) if it can't be stored.
+        public CacheEntry CommitUnverified(string stagingFolder, ModEntry expected, long modioFileId) {
+            string actual;
+            return Store(stagingFolder, expected, modioFileId, false, out actual);
+        }
+
+        private CacheEntry Store(string stagingFolder, ModEntry expected, long modioFileId, bool verify, out string actualHash) {
+            actualHash = "";
             try {
                 string[] files = Directory.GetFiles(stagingFolder, "*", SearchOption.AllDirectories);
-                string hash = ModInventory.HashFolder(stagingFolder, files, HashCache.Load(Path.Combine(stagingFolder, "..", "nohashcache.json")));
-                if(!IsSafeKey(expected.hash) || hash != expected.hash) {
+                HashCache noCache = HashCache.Load(Path.Combine(stagingFolder, "..", "nohashcache.json"));
+                string hash = actualHash = ModInventory.HashFolder(stagingFolder, files, noCache);
+                // An AMP 1.0.0 host counts and sends modio-thumbnail.png: its hash is still a valid name for these files
+                if(verify && hash != expected.hash && files.Any(f => Path.GetFileName(f).Equals(ModInventory.ModioThumbnail, StringComparison.OrdinalIgnoreCase))
+                   && ModInventory.HashFolder(stagingFolder, files, noCache, true) == expected.hash) hash = expected.hash;
+                if(verify ? !IsSafeKey(expected.hash) || hash != expected.hash : !IsSafeKey(hash)) {
                     Directory.Delete(stagingFolder, true);
                     return null;
                 }
@@ -66,6 +89,7 @@ namespace AMP.ModSync {
                     folder        = expected.folder,
                     name          = expected.name,
                     modioId       = expected.modioId,
+                    modioFileId   = modioFileId,
                     sizeBytes     = files.Where(f => ModInventory.IsHashedFile(ModInventory.RelativePath(stagingFolder, f)))
                                          .Sum(f => new FileInfo(Path.Combine(content, ModInventory.RelativePath(stagingFolder, f))).Length),
                     lastUsedTicks = DateTime.UtcNow.Ticks,
