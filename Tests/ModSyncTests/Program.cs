@@ -22,6 +22,7 @@ internal static class Program {
         HardeningTests();
         JournalTests();
         ApplierTests();
+        HelperTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -335,6 +336,39 @@ internal static class Program {
             }
         }
         JournalApplier.RetryMs = savedRetryMs;
+    }
+
+    private static void HelperTests() {
+        string ps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+        if(!File.Exists(ps)) { T("powershell not available (skipped)", true); return; }
+
+        using(var f = new TestFolders()) {
+            f.Mod("Extra");
+            string cache = Path.Combine(f.Root, "cache");
+            string journalPath = Path.Combine(f.Root, "journal", "session.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(journalPath));
+            var j = new SwapJournal { mode = SwapMode.Temporary };
+            j.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "Extra" });
+            File.WriteAllText(journalPath, j.ToJson());
+
+            string script = Path.Combine(f.Root, "helper.ps1");
+            File.WriteAllText(script, HelperScript.Script());
+            string ampDll  = typeof(JournalApplier).Assembly.Location;           // the test exe contains the same source
+            string jsonDll = typeof(Newtonsoft.Json.JsonConvert).Assembly.Location;
+            string log = Path.Combine(f.Root, "helper.log");
+
+            // Wait on a short-lived dummy process instead of the game
+            var dummy = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c ping -n 2 127.0.0.1 >nul") { CreateNoWindow = true, UseShellExecute = false });
+            var launcher = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ps,
+                HelperScript.LauncherArguments(script, dummy.Id, ampDll, jsonDll, journalPath, f.Mods, cache, "apply", false, log)) { CreateNoWindow = true, UseShellExecute = false });
+            launcher.WaitForExit(30000);
+
+            DateTime until = DateTime.UtcNow.AddSeconds(60);
+            while(DateTime.UtcNow < until && !(File.Exists(log) && File.ReadAllText(log).Contains("done") || File.Exists(log) && File.ReadAllText(log).Contains("fail"))) System.Threading.Thread.Sleep(500);
+
+            T("helper ran through WMI and applied the journal", Directory.Exists(Path.Combine(f.Mods, "_AMPoff_Extra")));
+            T("helper wrote the updated journal", SwapJournal.FromJson(File.ReadAllText(journalPath)).state == SwapState.Applied);
+        }
     }
 
     private static ModEntry M(string folder, string hash = "h", long modio = 0, string name = null, bool enabled = true, bool amp = false) {
