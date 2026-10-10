@@ -1,0 +1,143 @@
+AMP multiplayer (fixed build) - how to install, host and join
+=============================================================
+
+Everyone who plays together needs THIS SAME BUILD (AMP Community). It will
+not work well with the normal AMP from Nexus/mod.io. PC (Steam) only.
+Quest support is coming in a later version.
+
+Download: https://github.com/rodthegod2/AMP-Community/releases
+(get "AMP-Community-<version>.zip" from the latest release; SHA256SUMS.txt
+lets you check the download).
+
+
+1. INSTALL (everyone)
+---------------------
+Unzip the download and copy the "MultiplayerMod" folder into:
+  <Steam>\steamapps\common\Blade & Sorcery\BladeAndSorcery_Data\StreamingAssets\Mods\
+Remove any other AMP / MultiplayerMod copy first.
+
+Updating: once installed, AMP checks the releases page when the game starts.
+If a newer version exists, press the "Update AMP" button (Book -> Mods ->
+AMP): it downloads, verifies and installs it and restarts the game. (Not
+for copies installed from mod.io - mod.io updates those.)
+
+Item and spell mods: everyone should have the same ones. Items someone
+else doesn't have show up as a default sword for them.
+
+Start the game and load into a level (not the main menu, character
+select or a dungeon). Use a separate save/character for multiplayer.
+
+
+2. HOST (one person, on PC)
+---------------------------
+In VR: open the book -> Mods -> AMP -> "Host" tab -> "Host on PC".
+The status line then shows your port (default 26950) and LAN IP.
+(Without the headset: press H on the keyboard for the desktop window,
+"Host Server ->".)
+
+Windows will ask whether Blade & Sorcery may use the network the first
+time: click Allow.
+
+Your friends need an address they can reach. Pick ONE:
+
+ a) Same house / same Wi-Fi: give them the "LAN IP" from the status line.
+
+ b) Over the internet, easiest: everyone installs Tailscale
+    (tailscale.com, free) or ZeroTier and joins the same network.
+    Give friends your Tailscale IP (starts with 100.). No router setup.
+
+ c) Over the internet, port forwarding: in your router, forward
+    port 26950 for BOTH TCP and UDP to your PC's LAN IP.
+    Give friends your public IP (search "what is my ip").
+
+Password / max players / port: after the first launch, edit
+  Documents\My Games\BladeAndSorcery\Saves\Default\Mods\MultiplayerMod\config.json
+  "inputCache": host_password, host_max_players (default 4), host_port
+Keep the port between 1 and 32767.
+
+As host you are lobby admin: you can kick and ban from the player list
+(a ban lasts until you stop hosting).
+
+
+3. JOIN (friends)
+-----------------
+Book -> Mods -> AMP -> "Join" -> "Direct (IP)".
+Enter the host's address (from step 2), port 26950, and the password if
+there is one, then press ">".
+
+If it fails you get a message:
+ - "Can't reach ..."  -> wrong address, host not running, or ports not
+                         forwarded / not on the same Tailscale network.
+ - "Wrong password", "Server is full" -> as it says.
+ - "Lost connection"  -> the host left or the connection dropped
+                         (now detected within ~15 seconds).
+
+
+4. OTHER WAYS (work, but without the server-side fixes)
+--------------------------------------------------------
+"Create >" in the Host tab and the public server list run on AMP's own
+servers with the official server code. Joining by code works, but the
+fixes that live on the server (spell throws for others, item jitter,
+ownership rules, host admin) are not active there.
+
+
+5. MOD CHECK ON JOIN (new)
+--------------------------
+When you join, the host's mod list is compared with yours (you'll see
+"Checking your mods..."; the first time can take a minute with big mods).
+If they differ, the book (Mods > AMP) lists what to download, replace or
+turn off. On PC press "Download & restart" (choose Temporary or Keep first):
+ - the mods download from the host (only from a host running this build,
+   using "Host on PC"), the game closes, swaps your Mods folder, reopens
+   through Steam and reconnects to the host by itself
+ - Temporary: when you quit, your own mods come back and the downloaded ones
+   go back into the cache (AMP_ModCache next to the Mods folder) for next time
+ - Keep: downloaded mods stay installed; mods that were only switched off
+   come back when you quit; your older copy of a replaced mod is saved in
+   AMP_ModCache/old
+ - nothing is ever deleted; if anything goes wrong, Mods > AMP shows
+   "Restore my mods"
+While the host's mods are installed, the game uses a separate multiplayer
+save (copies of your characters and settings), so your own characters never
+lose items from mods that are switched off. Back to normal when you quit.
+If your AMP build differs from the host's, AMP is updated the same way.
+Quest players can't download yet (Quest support is coming in a later version).
+
+Host settings in config.json -> "hostingSettings":
+ "modSyncMode": "warn"     joiners see the differences and can "Join anyway" (default)
+                "enforce"  joiners must have the same mods to get in
+                "off"      no check (old behaviour)
+ "personalMods": [...]     folder names joiners may have or not have freely
+                           (e.g. menu or collision tweaks)
+
+The check trusts each player's own game, so it's for keeping friends in
+sync, not an anti-cheat.
+
+
+6. SETTINGS SYNC (new)
+----------------------
+While you're connected, your gameplay Mod Options (spell damage, toggles,
+etc. of the mods you share with the host) follow the host's values, live:
+if the host changes one, your menu changes too. You can't change those
+while connected ("This setting is set by the host"). Personal options
+(volume, sound, menus, controls, haptics) stay yours.
+When you leave - or restart after a crash - your own values come back.
+
+Host settings are now in the book: Mods > AMP > Host settings
+ PvP, PvP Damage %, Players Change Map, Host Runs Enemies.
+Changing them while hosting applies immediately.
+
+config.json -> "hostingSettings":
+ "syncModSettings": false   turns settings sync off for your server
+ "settingOverrides": { "SomeMod/Some Option": "personal" }   (or "server")
+                            fix an option the automatic rules got wrong
+
+
+7. YOUR OWN NAME
+----------------
+In config.json set "customName": "YourName" (max 32 characters).
+
+
+Other host settings (config.json -> "hostingSettings"):
+ allowVoiceChat, ownerHoldSeconds (default 1.5, stops enemies flickering
+ between players)

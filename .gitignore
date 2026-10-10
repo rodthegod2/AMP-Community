@@ -4,3 +4,4 @@ bin
 .vs/
 .vscode/
 mono_crash*
+dist/

@@ -1,3 +1,5 @@
+**This is the community fork - see [README-COMMUNITY.md](README-COMMUNITY.md) for downloads and install help.**
+
 # AMP - Adammantium Multiplayer Mod
 [![forthebadge](https://forthebadge.com/images/badges/built-with-love.svg)](https://forthebadge.com)
 [![forthebadge](https://forthebadge.com/images/badges/fuck-it-ship-it.svg)](https://forthebadge.com)
