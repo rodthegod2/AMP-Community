@@ -35,6 +35,7 @@ namespace AMP.ModSync {
             { "waitSpawn",           "" },
             { "host",                "port:int[1-32767] maxPlayers:int[1-64]? password:string?" }, // 32767: Netamite stores ports as short
             { "join",                "address:string port:int[1-32767] password:string?" },
+            { "waitPlayers",         "count:int[1-64]" }, // host: this many players greeted (the host's own client counts)
             { "expectModSync",       "blocks:bool" },
             { "downloadAndRestart",  "mode:mode" },
             { "expectRejoined",      "" },
@@ -142,6 +143,21 @@ namespace AMP.ModSync {
                 if(!known.Contains(property.Name)) { problem = at + "unknown key \"" + property.Name + "\""; return null; }
             }
             return step;
+        }
+
+        // A relaunch must start an isolated test again: without these the game would use the player's real saves.
+        // relaunchArgs are the arguments passed to steam.exe. Null when they are fine, otherwise what is missing.
+        public static string IsolationProblem(string[] relaunchArgs) {
+            if(relaunchArgs == null) return "no arguments";
+            var list = relaunchArgs.ToList();
+            Func<string, string> after = flag => { int i = list.LastIndexOf(flag); return i >= 0 && i + 1 < list.Count ? list[i + 1] : null; };
+            if(after("--doorstop-enabled") != "true") return "--doorstop-enabled true is missing";
+            if(string.IsNullOrEmpty(after("--doorstop-target-assembly"))) return "--doorstop-target-assembly is missing";
+            string docs = after("-amp-test-docs");
+            if(string.IsNullOrEmpty(docs) || !Path.IsPathRooted(docs)) return "-amp-test-docs <absolute folder> is missing";
+            if(string.IsNullOrEmpty(after("-amp-autopilot"))) return "-amp-autopilot is missing";
+            if(after("-vrmode") != "mockhmd") return "the last -vrmode is not mockhmd";
+            return null;
         }
 
         // The value after a flag (args[0] is the program, never a flag); null when the flag or its value is missing

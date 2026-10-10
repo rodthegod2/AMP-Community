@@ -47,14 +47,14 @@ $Scenarios = [ordered]@{
         GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'host'
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $false }, @{ step = 'wait'; seconds = 3 },
                      @{ step = 'expectOption'; mod = 'MultiplayerMod'; option = 'PvP'; title = 'Disabled' }, @{ step = 'quit' })
-        Expect   = @{ reports = @('ready'); greetings = 1; sendSnapshot = @(@{ mod = 'MultiplayerMod'; option = 'PvP'; title = 'Disabled'; index = 0 }); lingerSec = 30 }
+        Expect   = @{ reports = @('ready'); greetings = 1; sendSnapshot = @(@{ mod = 'MultiplayerMod'; option = 'PvP'; title = 'Disabled'; index = 0 }); lingerSec = 10 }
     }
     'join-download-temporary' = @{
         GameMods = $Base; BotMods = $Base + $Dummy; BotMode = 'host'; WaitRestore = $true
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
                      @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 300 }, @{ step = 'expectRejoined'; timeout = 300 },
                      @{ step = 'expectModFolder'; folder = $Dummy; present = $true }, @{ step = 'expectProfileActive'; active = $true }, @{ step = 'quit' })
-        Expect   = @{ reports = @('needs_setup', 'ready'); served = @($Dummy); greetings = 1; lingerSec = 30 }
+        Expect   = @{ reports = @('needs_setup', 'ready'); served = @($Dummy); greetings = 1; lingerSec = 10 }
     }
 }
 

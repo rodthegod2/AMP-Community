@@ -993,6 +993,10 @@ internal static class Program {
         T("the swap mode is normalized", full.Steps[4].Str("mode") == "Temporary");
         T("a wait step gets time for the wait itself", full.Steps[11].TimeoutSec == 35);
 
+        var players = Parse(@"[{""step"":""waitPlayers"",""count"":2}]", out error);
+        T("waitPlayers parses (" + error + ")", players != null && players.Steps[0].Int("count") == 2);
+        T("waitPlayers needs a count of at least 1", Rejected(@"[{""step"":""waitPlayers"",""count"":0}]", "count") && Rejected(@"[{""step"":""waitPlayers""}]", "count"));
+
         T("invalid JSON is rejected", Rejected("[{", "json"));
         T("an object instead of an array is rejected", Rejected(@"{""step"":""quit""}", "array"));
         T("an empty script is rejected", Rejected("[]", "no steps"));
@@ -1057,6 +1061,18 @@ internal static class Program {
         T("relaunch goes through Steam", args[0] == "-applaunch" && args[1] == "629730");
         T("relaunch drops argv[0] and Steam's leading '-vrmode openvr'", args[2] == "--doorstop-enabled" && !args.Contains("openvr") && args.Count(a => a == "-vrmode") == 1);
         T("relaunch keeps every original argument in order", string.Join("|", args.Skip(2)) == @"--doorstop-enabled|true|-amp-test-docs|C:\docs|-vrmode|mockhmd|-logFile|C:\a b\run.log");
+        string[] isolated = HelperScript.SteamRelaunchArguments("629730", new[] { "x.exe", "-vrmode", "openvr", "--doorstop-enabled", "true", "--doorstop-target-assembly", @"AmpTestBoot\AmpTestBoot.dll",
+                                                                            "-amp-test-docs", @"C:\docs", "-vrmode", "mockhmd", "-amp-autopilot", @"C:\s.json" });
+        T("an isolated test relaunch passes the isolation check", AutopilotScript.IsolationProblem(isolated) == null);
+        Func<string[], string, string[]> without = (a, flag) => { var l = a.ToList(); int i = l.IndexOf(flag); l.RemoveRange(i, 2); return l.ToArray(); };
+        T("a relaunch without the doorstop flag is refused", AutopilotScript.IsolationProblem(without(isolated, "--doorstop-enabled")) != null);
+        T("a relaunch without the boot assembly is refused", AutopilotScript.IsolationProblem(without(isolated, "--doorstop-target-assembly")) != null);
+        T("a relaunch without the test docs folder is refused", AutopilotScript.IsolationProblem(without(isolated, "-amp-test-docs")) != null);
+        T("a relaunch without the autopilot is refused", AutopilotScript.IsolationProblem(without(isolated, "-amp-autopilot")) != null);
+        T("a relaunch with a relative docs folder is refused", AutopilotScript.IsolationProblem(isolated.Select(a => a == @"C:\docs" ? "docs" : a).ToArray()) != null);
+        T("a relaunch ending in -vrmode openvr is refused", AutopilotScript.IsolationProblem(isolated.Concat(new[] { "-vrmode", "openvr" }).ToArray()) != null);
+        T("doorstop disabled is refused", AutopilotScript.IsolationProblem(isolated.Select(a => a == "true" ? "false" : a).ToArray()) != null);
+        T("no arguments are refused", AutopilotScript.IsolationProblem(null) != null && AutopilotScript.IsolationProblem(new string[0]) != null);
         string[] plain = HelperScript.SteamRelaunchArguments("629730", new[] { "x.exe", "-skipintro" });
         T("without Steam's -vrmode nothing else is dropped", string.Join("|", plain) == "-applaunch|629730|-skipintro");
         string[] later = HelperScript.SteamRelaunchArguments("629730", new[] { "x.exe", "-skipintro", "-vrmode", "openvr" });

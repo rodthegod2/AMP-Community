@@ -4,6 +4,7 @@ using AMP.Overlay;
 using System;
 using System.Collections;
 using System.IO;
+using System.Linq;
 using ThunderRoad;
 using UnityEngine;
 using ClientType = AMP.Network.Client.Client;
@@ -40,7 +41,11 @@ namespace AMP.ModSync {
 
         // The harness started the game through Steam with these arguments; a relaunch after a mod swap has to do the same
         internal static string RelaunchSpec() {
-            return HelperScript.RelaunchSpec(SteamExe(), HelperScript.SteamRelaunchArguments(HelperScript.SteamAppId, Environment.GetCommandLineArgs()));
+            return HelperScript.RelaunchSpec(SteamExe(), RelaunchArguments());
+        }
+
+        private static string[] RelaunchArguments() {
+            return HelperScript.SteamRelaunchArguments(HelperScript.SteamAppId, Environment.GetCommandLineArgs());
         }
 
         private static string SteamExe() {
@@ -76,6 +81,7 @@ namespace AMP.ModSync {
             AutopilotState state = AutopilotState.Load(statePath, AutopilotState.HashOf(text));
             Application.quitting += () => { if(restartStep >= 0) Debug.Log(Prefix + "OK " + restartStep + " (closing for the restart)"); };
             Debug.Log(Prefix + "START " + script.Steps.Count + " steps, continuing at step " + state.step);
+            Debug.Log(Prefix + "INFO relaunch arguments: " + HelperScript.QuoteArguments(RelaunchArguments()));
 
             // The same things the book needs before it can host or join
             float readyBy = Time.realtimeSinceStartup + AutopilotScript.DefaultTimeoutSec;
@@ -128,6 +134,7 @@ namespace AMP.ModSync {
                 case "waitSpawn":           return WaitSpawn();
                 case "host":                return Host(step);
                 case "join":                return Join(step);
+                case "waitPlayers":         return WaitPlayers(step);
                 case "expectModSync":       return ExpectModSync(step);
                 case "downloadAndRestart":  return DownloadAndRestart(n, step, state, statePath);
                 case "expectRejoined":      return ExpectRejoined(state);
@@ -174,6 +181,15 @@ namespace AMP.ModSync {
             }
         }
 
+        private static IEnumerator WaitPlayers(AutopilotStep step) {
+            while(true) {
+                Network.Server.Server server = ModManager.serverInstance;
+                if(server == null) { failure = "not hosting"; yield break; }
+                if(server.Clients.Count(c => c.greeted) >= step.Int("count")) yield break;
+                yield return Poll;
+            }
+        }
+
         private static IEnumerator ExpectModSync(AutopilotStep step) {
             while(ModSyncClient.Plan == null) {
                 if(ModManager.clientInstance == null) { failure = "not connected, no mod plan will arrive"; yield break; }
@@ -192,6 +208,9 @@ namespace AMP.ModSync {
                 yield return Poll;
             }
             if(!ModSwapClient.CanDownload(ModSyncClient.Plan)) { failure = "the plan can't be downloaded (not a Windows host, or nothing to fetch)"; yield break; }
+            // The relaunched game must be an isolated test again, or it would run on the player's real saves
+            string unsafeRelaunch = AutopilotScript.IsolationProblem(RelaunchArguments());
+            if(unsafeRelaunch != null) { failure = "refusing to restart, the relaunch wouldn't be isolated: " + unsafeRelaunch; yield break; }
 
             state.values["restartedFrom"] = n.ToString();
             state.step = n + 1;
