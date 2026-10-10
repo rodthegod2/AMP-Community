@@ -14,6 +14,8 @@ namespace AMP.ModSync {
     internal static class SettingsSyncHost {
         private static readonly List<KeyValuePair<ModOption, Action<object>>> subscriptions = new List<KeyValuePair<ModOption, Action<object>>>();
 
+        private static readonly SentSettings sent = new SentSettings(); // what joiners were last told, per option
+
         private static bool Enabled { get { return ModManager.safeFile.hostingSettings.syncModSettings; } }
 
         // Main thread, when hosting starts
@@ -21,6 +23,7 @@ namespace AMP.ModSync {
             Stop();
             if(!Enabled) return;
             foreach(ModOption option in ServerSideOptions()) {
+                sent.Remember(ModOptionBridge.Read(option));
                 ModOption captured = option;
                 Action<object> handler = _ => OnChanged(captured);
                 option.ValueChanged += handler;
@@ -33,6 +36,7 @@ namespace AMP.ModSync {
         internal static void Stop() {
             foreach(var subscription in subscriptions) subscription.Key.ValueChanged -= subscription.Value;
             subscriptions.Clear();
+            sent.Clear();
         }
 
         // Any thread: called at the end of Server.GreetPlayer
@@ -46,8 +50,10 @@ namespace AMP.ModSync {
 
         private static void OnChanged(ModOption option) {
             if(ModManager.serverInstance == null) return;
+            OptionValue value = ModOptionBridge.Read(option);
+            if(!sent.IsChange(value)) return; // applied again with the same value: joiners already have it
             var message = new SettingsMessage();
-            message.values.Add(ModOptionBridge.Read(option));
+            message.values.Add(value);
             Send(ModManager.serverInstance.Clients.Where(ModSyncHost.IsPlaying), ModSyncPacket.SETTING_CHANGED, message);
         }
 

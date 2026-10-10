@@ -15,6 +15,32 @@ namespace AMP.ModSync {
         public List<OptionValue> values = new List<OptionValue>();
     }
 
+    // Remembers the last value of each option the host told its joiners, so a menu apply that didn't change anything isn't broadcast again
+    public class SentSettings {
+        private readonly Dictionary<string, string> last = new Dictionary<string, string>();
+
+        private static string Key(OptionValue v)   { return v.mod + "/" + v.option; }
+        private static string Value(OptionValue v) { return v.index + "|" + v.title; }
+
+        public void Clear() { lock(last) last.Clear(); }
+
+        public void Remember(OptionValue value) {
+            if(value == null) return;
+            lock(last) last[Key(value)] = Value(value);
+        }
+
+        // True (and remembered) when the value differs from the last one known for that option
+        public bool IsChange(OptionValue value) {
+            if(value == null) return false;
+            lock(last) {
+                string before;
+                if(last.TryGetValue(Key(value), out before) && before == Value(value)) return false;
+                last[Key(value)] = Value(value);
+                return true;
+            }
+        }
+    }
+
     public static class SettingsRules {
         // AMP's own options in this category are the host's server settings; the rest of AMP's options are personal
         public const string AmpHostCategory = "Host settings";
