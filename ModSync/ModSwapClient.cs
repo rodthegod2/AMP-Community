@@ -182,6 +182,7 @@ namespace AMP.ModSync {
                 case SwapState.Applied:
                     if(journal.rejoinPending) {
                         journal.rejoinPending = false;
+                        RejoinStarted = true;
                         Save(journal);
                         ModManager.instance.StartCoroutine(RejoinRoutine(journal.host, journal.port, journal.password));
                     }
@@ -315,7 +316,9 @@ namespace AMP.ModSync {
             return Player.currentCreature != null;
         }
 
-        private static void Notice(string text) {
+        internal static bool RejoinStarted { get; private set; } // this start reconnects by itself, so the player is already told what is going on
+
+        internal static void Notice(string text) {
             if(ModManager.instance == null) return;
             ModManager.instance.StartCoroutine(NoticeRoutine(text));
         }

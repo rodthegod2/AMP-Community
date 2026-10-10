@@ -111,7 +111,7 @@ namespace AMP.ModSync {
                 SwapOp op = journal.ops[i];
                 if(!op.done && !op.started) continue; // never touched
                 if(op.keep && !undoKept) continue;
-                if(!everything && (op.kind == SwapOpKind.Install || op.kind == SwapOpKind.MoveAside)) continue;
+                if(!everything && !(op.keep && undoKept) && (op.kind == SwapOpKind.Install || op.kind == SwapOpKind.MoveAside)) continue;
                 try {
                     UndoOne(op, journal, modsFolder, cacheRoot, journalDir);
                     op.done = false;
@@ -229,8 +229,8 @@ namespace AMP.ModSync {
 
         private static string Note(SwapJournal journal, string cacheRoot) {
             var parts = new List<string>();
-            if(journal.mode == SwapMode.Keep) {
-                foreach(SwapOp op in journal.ops.Where(o => o.kind == SwapOpKind.MoveAside && o.done)) {
+            {
+                foreach(SwapOp op in journal.ops.Where(o => o.kind == SwapOpKind.MoveAside && o.done && (journal.mode == SwapMode.Keep || o.keep))) {
                     parts.Add("your previous version of " + op.folder + " is saved in " + Path.Combine(OldFolder(cacheRoot, journal), op.folder));
                 }
             }

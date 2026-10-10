@@ -225,7 +225,10 @@ namespace AMP.ModSync {
             ModLoader.hostSettingsReconciled = true;
         }
 
-        private static string BackupPath { get { return Path.Combine(ModSyncPaths.CacheFolder ?? "", BackupFile); } }
+        // Each save profile has its own backup: values saved under one profile are never restored into the other
+        private static string BackupPath {
+            get { return Path.Combine(ModSyncPaths.CacheFolder ?? "", ProfileSwitch.Active ? "settings-backup.AMP_Multiplayer.json" : BackupFile); }
+        }
 
         // Adds this session's originals to what an earlier, not yet restored session left in the file
         private static void SaveBackup() {

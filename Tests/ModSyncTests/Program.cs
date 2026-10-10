@@ -279,6 +279,9 @@ internal static class Program {
         SwapJournal aj = JournalPlanner.Build(ampPlan, null, "h", 1, "", SwapMode.Temporary);
         T("AMP: move-aside uses the joiner's folder, install the host's, both kept",
             aj.ops.Any(o => o.kind == SwapOpKind.MoveAside && o.folder == "AMPOld" && o.keep) && aj.ops.Any(o => o.kind == SwapOpKind.Install && o.folder == "AMPNew" && o.keep));
+        int amove = aj.ops.FindIndex(o => o.kind == SwapOpKind.MoveAside && o.keep);
+        T("AMP: install directly follows the move-aside, before other installs", aj.ops[amove + 1].kind == SwapOpKind.Install && aj.ops[amove + 1].keep
+            && aj.ops.FindIndex(o => o.kind == SwapOpKind.Install && o.folder == "Old") > amove + 1);
         T("other mods' ops are not kept", aj.ops.Where(o => o.folder == "Old").All(o => !o.keep));
 
         string json = j.ToJson();
@@ -391,6 +394,18 @@ internal static class Program {
                     applied = JournalApplier.Apply(bj, g.Mods, cr, Path.Combine(g.Root, "j2"));
                 }
                 T("a failed Apply rolls the AMP ops back", !applied && bj.state == SwapState.Restored && Directory.Exists(Path.Combine(g.Mods, "AMPOld")) && !Directory.Exists(Path.Combine(g.Mods, "AMPNew")));
+            }
+
+            using(var g = new TestFolders()) {
+                // Keep mode, AMP update interrupted between move-aside and install: restoring brings AMP back
+                string cr = Path.Combine(g.Root, "cache");
+                Directory.CreateDirectory(Path.Combine(cr, "old", "ab12", "AMPOld"));
+                File.WriteAllText(Path.Combine(cr, "old", "ab12", "AMPOld", "v.txt"), "old-amp");
+                var kj = new SwapJournal { id = "ab12", mode = SwapMode.Keep, state = SwapState.RestorePending };
+                kj.ops.Add(new SwapOp { kind = SwapOpKind.MoveAside, folder = "AMPOld", keep = true, done = true });
+                kj.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = "AMPNew", hash = new string('e', 64), keep = true });
+                T("Keep-mode restore of an incomplete AMP update brings the old AMP back", JournalApplier.Restore(kj, g.Mods, cr, Path.Combine(g.Root, "j"))
+                    && File.ReadAllText(Path.Combine(g.Mods, "AMPOld", "v.txt")) == "old-amp");
             }
 
             CrashSafetyTests();
@@ -625,6 +640,7 @@ internal static class Program {
         var ampDiff = P(Host("windows", M("A"), M("MultiplayerMod", hash: "x", amp: true)), "windows", M("A"), M("MultiplayerMod", hash: "y", amp: true));
         T("AMP: same platform gets exactly one Replace from the host", ampDiff.steps.Count == 1 && ampDiff.steps[0].action == SyncAction.Replace
             && ampDiff.steps[0].hostMod.isAmp && ampDiff.steps[0].localMod.isAmp && ampDiff.steps[0].source == "host");
+        T("AMP update says it stays installed", ampDiff.Describe().Contains("stays installed") && ampDiff.Describe().Contains("AMP_ModCache/old"));
         T("AMP update is described as the host's build", ampDiff.Describe().Contains("AMP update (host's build)"));
         var ampSame = P(Host("windows", M("MultiplayerMod", hash: "x", amp: true)), "windows", M("MultiplayerMod", hash: "x", amp: true));
         T("AMP: identical build gives no step", ampSame.steps.Count == 0);
@@ -717,6 +733,16 @@ internal static class Program {
             string empty = Path.Combine(f.Root, "Saves", "Empty");
             T("a missing Default folder still gives an empty profile", ProfileSeeder.EnsureSeeded(Path.Combine(f.Root, "nope"), empty)
                 && Directory.Exists(empty) && Directory.GetFiles(empty).Length == 0);
+
+            string bare = Path.Combine(f.Root, "Saves", "Bare");
+            Directory.CreateDirectory(bare);
+            File.WriteAllText(Path.Combine(bare, "other.txt"), "keep");
+            T("an existing folder without settings or characters gets seeded", ProfileSeeder.EnsureSeeded(def, bare)
+                && File.Exists(Path.Combine(bare, "a.chr")) && File.ReadAllText(Path.Combine(bare, "other.txt")) == "keep");
+            Directory.CreateDirectory(Path.Combine(f.Root, "Saves", "Half"));
+            File.WriteAllText(Path.Combine(f.Root, "Saves", "Half", "b.chr"), "B-own");
+            T("a folder with a character is left alone", ProfileSeeder.EnsureSeeded(def, Path.Combine(f.Root, "Saves", "Half"))
+                && !File.Exists(Path.Combine(f.Root, "Saves", "Half", "a.chr")));
 
             string stale = Path.Combine(f.Root, "Saves", "Stale");
             Directory.CreateDirectory(stale + ".seeding");

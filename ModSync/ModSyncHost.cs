@@ -70,7 +70,7 @@ namespace AMP.ModSync {
                     HostMods       = set.mods;
                 }
                 set.loadOrder = ModInventory.ReadLoadOrder(modsFolder);
-                ModEntry amp  = mods.FirstOrDefault(m => m.isAmp);
+                ModEntry amp  = mods.FirstOrDefault(m => m.isAmp && m.enabled);
                 set.ampBuild  = amp != null ? amp.hash : "";
                 Log.Info(Defines.SERVER, $"Mod sync ({set.mode}): hosting with {set.mods.Count} mods.");
                 return JsonConvert.SerializeObject(set);

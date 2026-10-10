@@ -2941,7 +2941,7 @@ namespace AMP.UI {
             string note = "\n\n" + (swapMode == ModSync.SwapMode.Temporary
                 ? "Temporary: your own mods come back when you quit the game."
                 : "Keep: the host's mods stay installed. \"Restore my mods\" undoes it.");
-            note += "\nYour characters are kept safe: multiplayer uses a copy of your saves.";
+            note += "\nMultiplayer uses copies of your characters while the host's mods are installed.";
             if(ModSync.ModSwapClient.LastError.Length > 0) note += "\n\n" + ModSync.ModSwapClient.LastError;
             return note;
         }

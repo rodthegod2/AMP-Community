@@ -59,6 +59,8 @@ namespace AMP.ModSync {
 
                 Active = true;
                 Log.Info(Defines.AMP, "Multiplayer profile active: " + profileFolder);
+                Log.Info(Defines.AMP, "Multiplayer profile: graphics options are not re-applied, they take effect on the next normal start.");
+                if(!ModSwapClient.RejoinStarted) ModSwapClient.Notice("You're playing on multiplayer copies of your characters.\nBook > Mods > AMP > Restore my mods to go back.");
             } catch(Exception e) {
                 // Whatever went wrong, the normal saves must be the ones in use
                 try { if(!Active && partialField != null && oldPartial != null) partialField.SetValue(platform, oldPartial); } catch(Exception) { }

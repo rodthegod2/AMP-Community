@@ -24,6 +24,7 @@ namespace AMP.ModSync {
         public bool BlocksJoin { get { return loadOrderDiffers || steps.Any(s => s.action != SyncAction.Unavailable); } }
 
         public IEnumerable<SyncStep> Of(SyncAction action) { return steps.Where(s => s.action == action); }
+        public IEnumerable<SyncStep> Steps(SyncAction first, SyncAction second) { return Of(first).Concat(Of(second)); }
 
         public string Describe() {
             var sb = new StringBuilder();
@@ -41,7 +42,7 @@ namespace AMP.ModSync {
             if(group.Count == 0) return;
             sb.AppendLine(title + ":");
             foreach(SyncStep step in group) {
-                string line = "  " + (step.Mod.isAmp ? "AMP update (host's build)" : step.Mod.name);
+                string line = "  " + (step.Mod.isAmp ? "AMP update (host's build) (stays installed; your previous build is kept in AMP_ModCache/old)" : step.Mod.name);
                 if(action == SyncAction.Add || action == SyncAction.Replace) line += " (" + Megabytes(step.Mod.sizeBytes) + ")";
                 if(step.Mod.hasCode && action != SyncAction.Disable) line += " [contains code]";
                 sb.AppendLine(line);
