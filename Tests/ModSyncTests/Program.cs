@@ -21,6 +21,7 @@ internal static class Program {
         CacheTests();
         HardeningTests();
         JournalTests();
+        ApplierTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -274,6 +275,66 @@ internal static class Program {
         SwapJournal back = SwapJournal.FromJson(json);
         T("journal round-trips through JSON", back.ops.Count == j.ops.Count && back.mode == SwapMode.Temporary && back.id == j.id);
         T("garbage JSON gives null", SwapJournal.FromJson("{not json") == null);
+    }
+
+    private static void ApplierTests() {
+        int savedRetryMs = JournalApplier.RetryMs;
+        JournalApplier.RetryMs = 200;
+        using(var f = new TestFolders()) {
+            string old = f.Mod("Old"); f.File_(old, "v.txt", "mine");
+            f.Mod("Extra");
+            File.WriteAllText(Path.Combine(f.Mods, "loadorder.json"), "{\"modNames\":[\"Extra\"]}");
+            string cacheRoot = Path.Combine(f.Root, "cache");
+            string hNew = new string('a', 64), hOld = new string('b', 64);
+            Directory.CreateDirectory(Path.Combine(cacheRoot, "mods", hNew, "content"));
+            File.WriteAllText(Path.Combine(cacheRoot, "mods", hNew, "content", "manifest.json"), "{\"Name\":\"New\"}");
+            Directory.CreateDirectory(Path.Combine(cacheRoot, "mods", hOld, "content"));
+            File.WriteAllText(Path.Combine(cacheRoot, "mods", hOld, "content", "v.txt"), "host");
+
+            var j = new SwapJournal { mode = SwapMode.Temporary, hostLoadOrder = new[] { "Old", "New" } };
+            j.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "Extra" });
+            j.ops.Add(new SwapOp { kind = SwapOpKind.MoveAside, folder = "Old" });
+            j.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = "Old", hash = hOld });
+            j.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = "New", hash = hNew });
+            j.ops.Add(new SwapOp { kind = SwapOpKind.LoadOrder });
+            string journalDir = Path.Combine(f.Root, "journal");
+
+            T("apply succeeds", JournalApplier.Apply(j, f.Mods, cacheRoot, journalDir) && j.state == SwapState.Applied);
+            T("extra mod disabled", Directory.Exists(Path.Combine(f.Mods, "_AMPoff_Extra")) && !Directory.Exists(Path.Combine(f.Mods, "Extra")));
+            T("old mod moved aside, host version installed", File.ReadAllText(Path.Combine(f.Mods, "_AMPold_Old", "v.txt")) == "mine" && File.ReadAllText(Path.Combine(f.Mods, "Old", "v.txt")) == "host");
+            T("new mod installed from cache", File.Exists(Path.Combine(f.Mods, "New", "manifest.json")));
+            T("host load order written", File.ReadAllText(Path.Combine(f.Mods, "loadorder.json")).Contains("New"));
+
+            T("temporary restore succeeds", JournalApplier.Restore(j, f.Mods, cacheRoot, journalDir) && j.state == SwapState.Restored);
+            T("everything is back", File.ReadAllText(Path.Combine(f.Mods, "Old", "v.txt")) == "mine" && Directory.Exists(Path.Combine(f.Mods, "Extra"))
+                                     && !Directory.Exists(Path.Combine(f.Mods, "New")) && !Directory.Exists(Path.Combine(f.Mods, "_AMPold_Old")));
+            T("cache entries are back", File.Exists(Path.Combine(cacheRoot, "mods", hNew, "content", "manifest.json")));
+            T("original load order is back", File.ReadAllText(Path.Combine(f.Mods, "loadorder.json")).Contains("Extra") && !File.ReadAllText(Path.Combine(f.Mods, "loadorder.json")).Contains("New"));
+
+            var keep = SwapJournal.FromJson(j.ToJson());
+            keep.mode = SwapMode.Keep; keep.state = SwapState.Planned; keep.ops.ForEach(o => o.done = false);
+            T("keep apply succeeds", JournalApplier.Apply(keep, f.Mods, cacheRoot, journalDir));
+            T("keep restore succeeds", JournalApplier.Restore(keep, f.Mods, cacheRoot, journalDir));
+            T("keep: extra re-enabled, host mods stay", Directory.Exists(Path.Combine(f.Mods, "Extra")) && Directory.Exists(Path.Combine(f.Mods, "New"))
+                                                       && File.ReadAllText(Path.Combine(f.Mods, "Old", "v.txt")) == "host" && Directory.Exists(Path.Combine(f.Mods, "_AMPold_Old")));
+
+            // Failure in the middle rolls back what was done
+            using(var g = new TestFolders()) {
+                g.Mod("A");
+                var bad = new SwapJournal { mode = SwapMode.Temporary };
+                bad.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "A" });
+                bad.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = "B", hash = new string('c', 64) }); // not in cache
+                T("apply with a missing cache entry fails", !JournalApplier.Apply(bad, g.Mods, Path.Combine(g.Root, "cache"), Path.Combine(g.Root, "j")));
+                T("...and rolls back the disable", Directory.Exists(Path.Combine(g.Mods, "A")) && bad.state == SwapState.Restored && bad.lastError.Length > 0);
+            }
+
+            using(var g = new TestFolders()) {
+                var evil = new SwapJournal();
+                evil.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "..\\x" });
+                T("unsafe folder names are refused", !JournalApplier.Apply(evil, g.Mods, Path.Combine(g.Root, "cache"), Path.Combine(g.Root, "j")));
+            }
+        }
+        JournalApplier.RetryMs = savedRetryMs;
     }
 
     private static ModEntry M(string folder, string hash = "h", long modio = 0, string name = null, bool enabled = true, bool amp = false) {
