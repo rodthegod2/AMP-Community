@@ -248,7 +248,6 @@
     <Compile Include="ModSync\TransferSender.cs" />
     <Compile Include="ModSync\TransferReceiver.cs" />
     <Compile Include="ModSync\ModCache.cs" />
-    <Compile Include="ModSync\Blob.cs" />
     <Compile Include="ModSync\ModTransferHost.cs" />
     <Compile Include="ModSync\ModTransferClient.cs" />
     <Compile Include="ModSync\ModSyncClient.cs" />

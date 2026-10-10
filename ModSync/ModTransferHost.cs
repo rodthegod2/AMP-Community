@@ -17,17 +17,20 @@ namespace AMP.ModSync {
     internal static class ModTransferHost {
         private const int WINDOW = 8;                 // unacknowledged chunks per joiner: bounds the delay added to gameplay packets
         private const int MAX_REQUEST_PARTS = 10;     // a request is a short list of folder names
+        private const int VERIFY_WAIT_MS = 10 * 60 * 1000; // time a joiner gets to verify one mod before the next one starts
 
         private class ActiveUpload {
             public ClientData client;
             public volatile bool cancelled;
             public volatile int transferId;
             public volatile TransferSender sender;
+            public readonly SemaphoreSlim readyNext = new SemaphoreSlim(0); // released when the joiner has verified a mod
 
             public void Cancel() {
                 cancelled = true;
                 TransferSender current = sender;
                 if(current != null) current.Cancel();
+                readyNext.Release(); // wakes the upload thread if it waits for the joiner
             }
         }
 
@@ -45,6 +48,11 @@ namespace AMP.ModSync {
                         TransferSender sender = upload.sender;
                         if(sender != null) sender.Ack();
                     }
+                    break;
+                }
+                case ModSyncPacket.READY_NEXT: {
+                    ActiveUpload upload;
+                    if(uploads.TryGetValue(client.ClientId, out upload) && upload.transferId == packet.transferId) upload.readyNext.Release();
                     break;
                 }
                 case ModSyncPacket.TRANSFER_CANCEL: {
@@ -154,6 +162,10 @@ namespace AMP.ModSync {
                     if(upload.cancelled) return; // the joiner asked to stop or left: nothing more to say
                     SendEnd(server, client, currentId, ok, ok ? "" : $"Sending {mod.name} was interrupted.");
                     if(!ok) return;
+                    if(mod != mods[mods.Count - 1] && !WaitForReady(upload)) {
+                        if(!upload.cancelled) SendEnd(server, client, currentId, false, "Verifying the mod took too long.");
+                        return;
+                    }
                 }
             } catch(Exception e) {
                 Log.Err(Defines.SERVER, "Mod sync: sending mods to " + client.ClientName + " failed. " + e.Message);
@@ -162,6 +174,12 @@ namespace AMP.ModSync {
                 // Forget this upload unless a newer one already replaced it
                 ((ICollection<KeyValuePair<int, ActiveUpload>>) uploads).Remove(new KeyValuePair<int, ActiveUpload>(client.ClientId, upload));
             }
+        }
+
+        // The joiner hashes a finished mod before it wants the next one; its acks stop meanwhile, so don't start sending yet
+        private static bool WaitForReady(ActiveUpload upload) {
+            if(!upload.readyNext.Wait(VERIFY_WAIT_MS)) return false;
+            return !upload.cancelled;
         }
 
         private static void SendEnd(ServerType server, ClientData client, int transferId, bool ok, string error) {

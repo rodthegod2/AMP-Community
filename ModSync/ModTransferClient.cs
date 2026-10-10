@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using ClientType = AMP.Network.Client.Client;
 
 namespace AMP.ModSync {
@@ -138,6 +139,7 @@ namespace AMP.ModSync {
             string finishedStaging = null;
             ModCache finishedCache = null;
             int finishedSession = 0;
+            int finishedId = 0;
 
             lock(gate) {
                 if(!IsCurrent()) return;
@@ -170,12 +172,12 @@ namespace AMP.ModSync {
                 }
 
                 if(receiver.Complete) { // a mod without files: nothing will be sent, go straight to verification
-                    finishedMod = TakeFinished(out finishedReceiver, out finishedStaging);
+                    finishedMod = TakeFinished(out finishedReceiver, out finishedStaging, out finishedId);
                     finishedCache = cache;
                     finishedSession = session;
                 }
             }
-            if(finishedMod != null) Commit(finishedSession, finishedCache, finishedMod, finishedReceiver, finishedStaging);
+            if(finishedMod != null) StartCommit(finishedSession, finishedCache, finishedMod, finishedReceiver, finishedStaging, finishedId);
         }
 
         // Network thread
@@ -185,17 +187,25 @@ namespace AMP.ModSync {
             string finishedStaging = null;
             ModCache finishedCache = null;
             int finishedSession = 0;
+            int finishedId = 0;
             Action<long, long, string> report = null;
             long received = 0, total = 0;
             string modName = null;
 
             lock(gate) {
                 if(!IsCurrent() || receiver == null || packet.transferId != receivingId) return;
-                if(packet.data == null || packet.data.bytes == null) return;
+                if(string.IsNullOrEmpty(packet.data)) return;
+                byte[] bytes;
+                try {
+                    bytes = Convert.FromBase64String(packet.data);
+                } catch(FormatException) {
+                    Finish(false, "The host sent data that isn't a valid file chunk.", true);
+                    return;
+                }
 
                 bool accepted;
                 try {
-                    accepted = receiver.OnChunk(packet.fileIndex, packet.offset, packet.data.bytes);
+                    accepted = receiver.OnChunk(packet.fileIndex, packet.offset, bytes);
                 } catch(IOException e) {
                     Finish(false, "Couldn't save the download. " + e.Message, true);
                     return;
@@ -215,7 +225,7 @@ namespace AMP.ModSync {
                 }
 
                 if(receiver.Complete) {
-                    finishedMod = TakeFinished(out finishedReceiver, out finishedStaging);
+                    finishedMod = TakeFinished(out finishedReceiver, out finishedStaging, out finishedId);
                     finishedCache = cache;
                     finishedSession = session;
                 } else if((DateTime.UtcNow - lastProgress).TotalMilliseconds >= PROGRESS_INTERVAL_MS) {
@@ -232,11 +242,15 @@ namespace AMP.ModSync {
                 long r = received, t = total;
                 Dispatcher.Enqueue(() => report(r, t, name));
             }
-            if(finishedMod != null) Commit(finishedSession, finishedCache, finishedMod, finishedReceiver, finishedStaging);
+            if(finishedMod != null) StartCommit(finishedSession, finishedCache, finishedMod, finishedReceiver, finishedStaging, finishedId);
         }
 
-        // Verifies and caches a fully received mod. Runs on the network thread without the lock: hashing a big mod takes seconds.
-        private static void Commit(int forSession, ModCache modCache, ModEntry mod, TransferReceiver finished, string stagingFolder) {
+        // Verifying and caching hashes the whole mod (seconds for a big one): a worker does it, never the network receive thread
+        private static void StartCommit(int forSession, ModCache modCache, ModEntry mod, TransferReceiver finished, string stagingFolder, int transferId) {
+            Task.Run(() => Commit(forSession, modCache, mod, finished, stagingFolder, transferId));
+        }
+
+        private static void Commit(int forSession, ModCache modCache, ModEntry mod, TransferReceiver finished, string stagingFolder, int transferId) {
             finished.Dispose();
             CacheEntry entry = null;
             try {
@@ -255,7 +269,14 @@ namespace AMP.ModSync {
                     return;
                 }
                 pending.Remove(mod.folder);
-                if(pending.Count > 0) return; // waiting for the next TRANSFER_START
+                if(pending.Count > 0) { // the host waits for this before it starts the next mod
+                    try {
+                        Send(client, new ModSyncPacket(ModSyncPacket.READY_NEXT, transferId, 0, 1, ""));
+                    } catch(Exception e) {
+                        Log.Err(Defines.CLIENT, "Mod sync: couldn't tell the host to continue. " + e.Message);
+                    }
+                    return;
+                }
 
                 evictCache = cache;
                 keep = keepHashes;
@@ -273,7 +294,8 @@ namespace AMP.ModSync {
         }
 
         // Inside the lock: hands out the finished receiver and staging folder, the download waits for the next manifest
-        private static ModEntry TakeFinished(out TransferReceiver finished, out string stagingFolder) {
+        private static ModEntry TakeFinished(out TransferReceiver finished, out string stagingFolder, out int transferId) {
+            transferId = receivingId;
             ModEntry mod = receiving;
             finished = receiver;
             stagingFolder = staging;

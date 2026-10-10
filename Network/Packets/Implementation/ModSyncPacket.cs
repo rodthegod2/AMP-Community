@@ -20,6 +20,7 @@ namespace AMP.Network.Packets.Implementation {
         public const byte CHUNK_ACK        = 7; // joiner -> host: transferId, no data
         public const byte TRANSFER_END     = 8; // host -> joiner: TransferEnd JSON
         public const byte TRANSFER_CANCEL  = 9; // joiner -> host: stop sending
+        public const byte READY_NEXT       = 10; // joiner -> host: the finished mod is verified, send the next one (transferId = finished transfer)
 
         [SyncedVar] public byte   kind;
         [SyncedVar] public int    transferId;
@@ -55,7 +56,7 @@ namespace AMP.Network.Packets.Implementation {
         }
 
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
-            if(kind == MODS_REQUEST || kind == CHUNK_ACK || kind == TRANSFER_CANCEL) ModTransferHost.OnPacket(client, this);
+            if(kind == MODS_REQUEST || kind == CHUNK_ACK || kind == TRANSFER_CANCEL || kind == READY_NEXT) ModTransferHost.OnPacket(client, this);
             else ModSyncHost.OnPacket(client, this);
             return true;
         }
