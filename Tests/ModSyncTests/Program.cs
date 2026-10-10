@@ -413,6 +413,32 @@ internal static class Program {
                 && Directory.GetDirectories(g.Mods, "_AMPconflict_*").Length == 1 && Directory.Exists(Path.Combine(g.Mods, "Same")));
         }
 
+        // Crash after the load order op was marked started, but before hadLoadOrder was saved: the player's file survives the undo
+        using(var g = new TestFolders()) {
+            string file = Path.Combine(g.Mods, "loadorder.json");
+            File.WriteAllText(file, "{\"modNames\":[\"Mine\"]}");
+            var lj = new SwapJournal { mode = SwapMode.Temporary }; // hadLoadOrder is false (never saved)
+            lj.ops.Add(new SwapOp { kind = SwapOpKind.LoadOrder, started = true });
+            T("undo of a started load order op keeps the player's file", JournalApplier.Restore(lj, g.Mods, Path.Combine(g.Root, "c"), Path.Combine(g.Root, "j"))
+                                                                         && File.ReadAllText(file).Contains("Mine"));
+        }
+
+        // The backup is saved before the op starts, and used for the undo
+        using(var g = new TestFolders()) {
+            string file = Path.Combine(g.Mods, "loadorder.json");
+            File.WriteAllText(file, "{\"modNames\":[\"Mine\"]}");
+            var lj = new SwapJournal { mode = SwapMode.Temporary, hostLoadOrder = new[] { "Host" } };
+            lj.ops.Add(new SwapOp { kind = SwapOpKind.LoadOrder });
+            bool backupFirst = false;
+            JournalApplier.Apply(lj, g.Mods, Path.Combine(g.Root, "c"), Path.Combine(g.Root, "j"), x => {
+                if(x.ops[0].started && !x.ops[0].done) return;
+                if(!x.ops[0].started && !x.ops[0].done && x.hadLoadOrder && File.Exists(Path.Combine(g.Root, "j", "loadorder.backup.json"))) backupFirst = true;
+            });
+            T("backup and hadLoadOrder are saved before the op is marked started", backupFirst);
+            File.WriteAllText(file, "{\"modNames\":[\"Host\"]}");
+            T("restore brings the player's load order back from the backup", JournalApplier.Restore(lj, g.Mods, Path.Combine(g.Root, "c"), Path.Combine(g.Root, "j")) && File.ReadAllText(file).Contains("Mine"));
+        }
+
         // Early failure: a name is taken, nothing has moved
         using(var g = new TestFolders()) {
             g.Mod("A"); g.Mod("B"); g.Mod("_AMPoff_B");

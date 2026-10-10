@@ -24,8 +24,8 @@ try {
     [AppDomain]::CurrentDomain.add_AssemblyResolve([ResolveEventHandler]{ param($sender, $e) if($e.Name -like 'Newtonsoft.Json,*') { return $json }; return $null })
     [void][Reflection.Assembly]::Load([IO.File]::ReadAllBytes($AmpDll))
     $result = [AMP.ModSync.JournalApplier]::RunFromHelper($Journal, $Mods, $Cache, $Action)
-    if($result -eq 'busy') { Write-Log 'busy: another helper is working'; exit 0 }
-    if($result) { Write-Log (""failed: "" + $result) } else { Write-Log 'done' }
+    if($result -eq 'busy') { Write-Log 'busy: another helper is working' }
+    elseif($result) { Write-Log (""failed: "" + $result) } else { Write-Log 'done' }
     $note = [AMP.ModSync.JournalApplier]::LastNote
     if($note) { Write-Log (""note: "" + $note) }
 } catch {

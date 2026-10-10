@@ -35,6 +35,7 @@ namespace AMP.ModSync {
                 if(problem != null) throw new IOException(problem);
 
                 foreach(SwapOp op in journal.ops.Where(o => !o.done)) {
+                    if(op.kind == SwapOpKind.LoadOrder) PrepareLoadOrder(journal, modsFolder, journalDir, persist); // the backup must be safe before the file is touched
                     op.started = true;
                     Persist(persist, journal);
                     Do(op, journal, modsFolder, cacheRoot, journalDir);
@@ -133,13 +134,21 @@ namespace AMP.ModSync {
                 case SwapOpKind.Install:   MoveDir(Path.Combine(cacheRoot, "mods", op.hash, "content"), Path.Combine(mods, op.folder)); break;
                 case SwapOpKind.LoadOrder: {
                     string file = Path.Combine(mods, "loadorder.json");
-                    Directory.CreateDirectory(journalDir);
-                    journal.hadLoadOrder = File.Exists(file);
-                    if(journal.hadLoadOrder) File.Copy(file, Path.Combine(journalDir, "loadorder.backup.json"), true);
                     File.WriteAllText(file, JsonConvert.SerializeObject(new { modNames = journal.hostLoadOrder }));
                     break;
                 }
             }
+        }
+
+        // Backup and "had one" are saved before the op is marked started, so a crash can never leave the player's file unrecoverable
+        private static void PrepareLoadOrder(SwapJournal journal, string mods, string journalDir, Action<SwapJournal> persist) {
+            string file = Path.Combine(mods, "loadorder.json");
+            string backup = Path.Combine(journalDir, "loadorder.backup.json");
+            Directory.CreateDirectory(journalDir);
+            journal.hadLoadOrder = File.Exists(file);
+            if(journal.hadLoadOrder) File.Copy(file, backup, true);
+            else if(File.Exists(backup)) File.Delete(backup); // left over from an earlier swap
+            Persist(persist, journal);
         }
 
         // Idempotent: an op that was never performed, or already undone, is simply fine
@@ -156,8 +165,9 @@ namespace AMP.ModSync {
                 case SwapOpKind.LoadOrder: {
                     string file = Path.Combine(mods, "loadorder.json");
                     string backup = Path.Combine(journalDir, "loadorder.backup.json");
-                    if(journal.hadLoadOrder && File.Exists(backup)) File.Copy(backup, file, true);
-                    else if(!journal.hadLoadOrder && File.Exists(file)) File.Delete(file);
+                    // A backup exists only if the player had a load order. Without one, the file is ours only once the op is done.
+                    if(File.Exists(backup)) File.Copy(backup, file, true);
+                    else if(op.done && !journal.hadLoadOrder && File.Exists(file)) File.Delete(file);
                     break;
                 }
             }

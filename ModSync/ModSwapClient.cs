@@ -127,6 +127,7 @@ namespace AMP.ModSync {
             }
             Log.Err(Defines.CLIENT, "Mod swap: the helper launcher " + (launcher != null && launcher.HasExited ? "exited with code " + launcher.ExitCode : "didn't finish in 10 s"));
             try { if(launcher != null && !launcher.HasExited) launcher.Kill(); } catch(Exception) { }
+            helperLaunched = false; // nothing is running that would handle the quit
             onFailed();
         }
 
@@ -193,6 +194,7 @@ namespace AMP.ModSync {
         internal static void OnQuit() {
             try {
                 // The file is the truth (a helper may have changed it since this game started), never a stale in-memory copy
+                if(helperLaunched) return; // RestoreNow / the download already started the helper that handles this
                 journal = Load();
                 if(journal == null || (journal.state != SwapState.Applied && journal.state != SwapState.RestorePending)) return;
                 journal.state = SwapState.RestorePending;
@@ -347,6 +349,8 @@ namespace AMP.ModSync {
         #region Helper and journal files
 
         // Starts a short-lived powershell that asks WMI to create the real helper (outside the game's process tree)
+        private static bool helperLaunched; // a helper was started in this session: OnQuit must not start a second one
+
         private static Process LaunchHelper(string action, bool relaunch) {
             string ampFolder = FindAmpFolder();
             if(ampFolder == null) throw new FileNotFoundException("AMP's own mod folder wasn't found.");
@@ -371,7 +375,9 @@ namespace AMP.ModSync {
             string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
             string arguments = HelperScript.LauncherArguments(script, Process.GetCurrentProcess().Id, ampCopy, jsonCopy, JournalPath,
                                                               ModSyncPaths.ModsFolder, ModSyncPaths.CacheFolder, action, relaunch, Path.Combine(HelperFolder, "helper.log"));
-            return Process.Start(new ProcessStartInfo(powershell, arguments) { UseShellExecute = false, CreateNoWindow = true });
+            Process launcher = Process.Start(new ProcessStartInfo(powershell, arguments) { UseShellExecute = false, CreateNoWindow = true });
+            helperLaunched = true;
+            return launcher;
         }
 
         private static void CleanOldRuns(string keep) {
