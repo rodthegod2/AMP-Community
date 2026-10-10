@@ -29,6 +29,7 @@
     <Compile Include="..\..\ModSync\ProfileSeeder.cs" />
     <Compile Include="..\..\ModSync\ReleaseInfo.cs" />
     <Compile Include="..\..\ModSync\ReleasePackage.cs" />
+    <Compile Include="..\..\ModSync\AutopilotScript.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.IO.Compression" />

@@ -27,6 +27,8 @@ internal static class Program {
         ProfileTests();
         ReleaseInfoTests();
         ReleasePackageTests();
+        AutopilotTests();
+        RelaunchTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -954,6 +956,159 @@ internal static class Program {
 
             string many = MakeZip(f, "many.zip", Enumerable.Range(0, 10001).SelectMany(i => new[] { "f" + i + ".txt", "" }).ToArray());
             T("more than 10,000 files is rejected", Rejects(() => ReleasePackage.ExtractAmpFolder(many, Staging(f), max)));
+        }
+    }
+
+    private static AutopilotScript Parse(string json, out string error) { return AutopilotScript.Parse(json, out error); }
+    private static bool Rejected(string json, string fragment) {
+        string error;
+        return Parse(json, out error) == null && error != null && error.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static void AutopilotTests() {
+        string error;
+        var full = Parse(@"[
+            {""step"":""waitSpawn""},
+            {""step"":""host"",""port"":27000},
+            {""step"":""join"",""address"":""127.0.0.1"",""port"":27001,""password"":""pw"",""timeout"":300},
+            {""step"":""expectModSync"",""blocks"":true},
+            {""step"":""downloadAndRestart"",""mode"":""temporary""},
+            {""step"":""expectRejoined""},
+            {""step"":""expectModFolder"",""folder"":""AmpE2EDummy"",""present"":true},
+            {""step"":""setOption"",""mod"":""MultiplayerMod"",""option"":""PvP"",""title"":""On""},
+            {""step"":""expectOption"",""mod"":""MultiplayerMod"",""option"":""PvP"",""title"":""On""},
+            {""step"":""expectProfileActive"",""active"":true},
+            {""step"":""disconnect""},
+            {""step"":""wait"",""seconds"":5},
+            {""step"":""quit""}]", out error);
+        T("a full script parses (" + error + ")", full != null && full.Steps.Count == 13);
+        if(full == null) return;
+        T("step names are kept in order", full.Steps[0].Name == "waitSpawn" && full.Steps[4].Name == "downloadAndRestart" && full.Steps[12].Name == "quit");
+        T("default step timeout is 120 s", full.Steps[0].TimeoutSec == 120);
+        T("an explicit timeout is used", full.Steps[2].TimeoutSec == 300);
+        T("typed getters work", full.Steps[1].Int("port") == 27000 && full.Steps[2].Str("address") == "127.0.0.1" && full.Steps[3].Bool("blocks") && full.Steps[9].Bool("active"));
+        T("an optional int falls back to its default", full.Steps[1].Int("maxPlayers", 4) == 4);
+        T("an optional string falls back to its default", full.Steps[1].Str("password", "") == "");
+        T("an optional value that is given wins", full.Steps[2].Str("password", "") == "pw");
+        T("the swap mode is normalized", full.Steps[4].Str("mode") == "Temporary");
+        T("a wait step gets time for the wait itself", full.Steps[11].TimeoutSec == 35);
+
+        T("invalid JSON is rejected", Rejected("[{", "json"));
+        T("an object instead of an array is rejected", Rejected(@"{""step"":""quit""}", "array"));
+        T("an empty script is rejected", Rejected("[]", "no steps"));
+        T("a step that is not an object is rejected", Rejected(@"[""quit""]", "step 0"));
+        T("a step without a name is rejected", Rejected(@"[{""port"":1}]", "step 0"));
+        T("an unknown step is rejected", Rejected(@"[{""step"":""dance""}]", "dance"));
+        T("an unknown key is rejected (typo guard)", Rejected(@"[{""step"":""host"",""port"":1,""maxPlayer"":2}]", "maxPlayer"));
+        T("a missing required key is rejected", Rejected(@"[{""step"":""host""}]", "port"));
+        T("a string where an int belongs is rejected", Rejected(@"[{""step"":""host"",""port"":""27000""}]", "port"));
+        T("a float where an int belongs is rejected", Rejected(@"[{""step"":""host"",""port"":1.5}]", "port"));
+        T("a port of 0 is rejected", Rejected(@"[{""step"":""host"",""port"":0}]", "port"));
+        T("a port above the Netamite limit is rejected", Rejected(@"[{""step"":""host"",""port"":32768}]", "port"));
+        T("maxPlayers 0 is rejected", Rejected(@"[{""step"":""host"",""port"":1,""maxPlayers"":0}]", "maxPlayers"));
+        T("a number where a bool belongs is rejected", Rejected(@"[{""step"":""expectModSync"",""blocks"":1}]", "blocks"));
+        T("a blank address is rejected", Rejected(@"[{""step"":""join"",""address"":"" "",""port"":1}]", "address"));
+        T("an unknown swap mode is rejected", Rejected(@"[{""step"":""downloadAndRestart"",""mode"":""Forever""}]", "mode"));
+        T("a mod folder with a path is rejected", Rejected(@"[{""step"":""expectModFolder"",""folder"":""..\\x"",""present"":true}]", "folder"));
+        T("a '..' mod folder is rejected", Rejected(@"[{""step"":""expectModFolder"",""folder"":"".."",""present"":true}]", "folder"));
+        T("a zero timeout is rejected", Rejected(@"[{""step"":""quit"",""timeout"":0}]", "timeout"));
+        T("a negative wait is rejected", Rejected(@"[{""step"":""wait"",""seconds"":-1}]", "seconds"));
+        T("steps after quit are rejected", Rejected(@"[{""step"":""quit""},{""step"":""disconnect""}]", "quit"));
+        T("the error names the step number and name", Rejected(@"[{""step"":""waitSpawn""},{""step"":""host""}]", "step 1 (host)"));
+        T("a null value is rejected", Rejected(@"[{""step"":""host"",""port"":null}]", "port"));
+
+        // Command line
+        string[] cmd = { "BladeAndSorcery.exe", "-vrmode", "mockhmd", "-amp-autopilot", @"C:\x y\script.json", "-logFile" };
+        T("FindArg returns the value after the flag", AutopilotScript.FindArg(cmd, "-amp-autopilot") == @"C:\x y\script.json");
+        T("FindArg returns null for a missing flag", AutopilotScript.FindArg(cmd, "-amp-test-docs") == null);
+        T("FindArg returns null for a flag without a value", AutopilotScript.FindArg(cmd, "-logFile") == null);
+        T("FindArg ignores argv[0]", AutopilotScript.FindArg(new[] { "-amp-autopilot", "x" }, "-amp-autopilot") == null);
+        T("FindArg survives null input", AutopilotScript.FindArg(null, "-x") == null);
+
+        // State
+        using(var f = new TestFolders()) {
+            string path = Path.Combine(f.Root, "state", "autopilot-state.json");
+            string hash = AutopilotState.HashOf("script text");
+            T("hash is stable and content-dependent", hash == AutopilotState.HashOf("script text") && hash != AutopilotState.HashOf("script text2") && hash.Length == 64);
+            var fresh = AutopilotState.Load(path, hash);
+            T("no state file starts at step 0", fresh.step == 0 && fresh.values.Count == 0);
+            fresh.step = 4;
+            fresh.values["restartedFrom"] = "3";
+            fresh.Save(path);
+            T("saving leaves no temp file", File.Exists(path) && !File.Exists(path + ".tmp"));
+            var back = AutopilotState.Load(path, hash);
+            T("state round-trips", back.step == 4 && back.values["restartedFrom"] == "3");
+            fresh.step = 5;
+            fresh.Save(path);
+            T("state can be overwritten", AutopilotState.Load(path, hash).step == 5);
+            T("a state of another script starts over", AutopilotState.Load(path, AutopilotState.HashOf("other")).step == 0);
+            File.WriteAllText(path, "{garbage");
+            T("a corrupt state starts over", AutopilotState.Load(path, hash).step == 0);
+            File.WriteAllText(path, @"{""scriptHash"":""" + hash + @""",""step"":-3}");
+            T("a negative step starts over", AutopilotState.Load(path, hash).step == 0);
+        }
+    }
+
+    private static string DecodeSpec(string spec) { return System.Text.Encoding.Unicode.GetString(Convert.FromBase64String(spec)); }
+
+    private static void RelaunchTests() {
+        string[] steamLaunch = { @"D:\Game\BladeAndSorcery.exe", "-vrmode", "openvr", "--doorstop-enabled", "true", "-amp-test-docs", @"C:\docs", "-vrmode", "mockhmd", "-logFile", @"C:\a b\run.log" };
+        string[] args = HelperScript.SteamRelaunchArguments("629730", steamLaunch);
+        T("relaunch goes through Steam", args[0] == "-applaunch" && args[1] == "629730");
+        T("relaunch drops argv[0] and Steam's leading '-vrmode openvr'", args[2] == "--doorstop-enabled" && !args.Contains("openvr") && args.Count(a => a == "-vrmode") == 1);
+        T("relaunch keeps every original argument in order", string.Join("|", args.Skip(2)) == @"--doorstop-enabled|true|-amp-test-docs|C:\docs|-vrmode|mockhmd|-logFile|C:\a b\run.log");
+        string[] plain = HelperScript.SteamRelaunchArguments("629730", new[] { "x.exe", "-skipintro" });
+        T("without Steam's -vrmode nothing else is dropped", string.Join("|", plain) == "-applaunch|629730|-skipintro");
+        string[] later = HelperScript.SteamRelaunchArguments("629730", new[] { "x.exe", "-skipintro", "-vrmode", "openvr" });
+        T("a later '-vrmode openvr' is the user's choice and stays", later.Length == 5 && later[4] == "openvr");
+        T("only the exe name gives only the Steam part", string.Join("|", HelperScript.SteamRelaunchArguments("629730", new[] { "x.exe" })) == "-applaunch|629730");
+        T("null command line gives only the Steam part", string.Join("|", HelperScript.SteamRelaunchArguments("629730", null)) == "-applaunch|629730");
+
+        T("plain arguments are not quoted", HelperScript.QuoteArguments(new[] { "-a", "b" }) == "-a b");
+        T("arguments with spaces are quoted", HelperScript.QuoteArguments(new[] { @"C:\a b\c" }) == "\"C:\\a b\\c\"");
+        T("an empty argument becomes \"\"", HelperScript.QuoteArguments(new[] { "a", "" }) == "a \"\"");
+        T("embedded quotes are escaped", HelperScript.QuoteArguments(new[] { "say \"hi\"" }) == "\"say \\\"hi\\\"\"");
+        T("a trailing backslash is doubled inside quotes", HelperScript.QuoteArguments(new[] { @"C:\a b\" }) == "\"C:\\a b\\\\\"");
+        T("a trailing backslash without spaces is left alone", HelperScript.QuoteArguments(new[] { @"C:\ab\" }) == @"C:\ab\");
+
+        string spec = HelperScript.RelaunchSpec(@"C:\Program Files (x86)\Steam\steam.exe", args);
+        string[] decoded = DecodeSpec(spec).Split(new[] { '\n' }, 2);
+        T("the spec holds the program and its quoted arguments", decoded[0] == @"C:\Program Files (x86)\Steam\steam.exe" && decoded[1].StartsWith("-applaunch 629730 --doorstop-enabled") && decoded[1].EndsWith("\"C:\\a b\\run.log\""));
+        T("the spec is plain base64 (safe on a command line)", spec.All(c => char.IsLetterOrDigit(c) || c == '+' || c == '/' || c == '='));
+
+        string normal = HelperScript.LauncherArguments("C:\\h.ps1", 1, "C:\\A.dll", "C:\\N.dll", "C:\\s.json", "C:\\M", "C:\\C", "apply", true, "C:\\h.log");
+        string withSpec = HelperScript.LauncherArguments("C:\\h.ps1", 1, "C:\\A.dll", "C:\\N.dll", "C:\\s.json", "C:\\M", "C:\\C", "apply", true, "C:\\h.log", spec);
+        string noRelaunch = HelperScript.LauncherArguments("C:\\h.ps1", 1, "C:\\A.dll", "C:\\N.dll", "C:\\s.json", "C:\\M", "C:\\C", "restore", false, "C:\\h.log", spec);
+        Func<string, string> dec = a => DecodeSpec(a.Substring(a.LastIndexOf(' ') + 1));
+        T("without a spec the helper command is unchanged", !dec(normal).Contains("-RelaunchSpec") && dec(normal).Contains("-Relaunch 1 -Log \"C:\\h.log\""));
+        T("the spec is passed to the helper", dec(withSpec).Contains("-Relaunch 1 -Log \"C:\\h.log\" -RelaunchSpec " + spec));
+        T("no relaunch means no spec", !dec(noRelaunch).Contains("-RelaunchSpec"));
+        T("the helper script knows the parameter and keeps the default", HelperScript.Script().Contains("[string]$RelaunchSpec") && HelperScript.Script().Contains("steam://rungameid/629730"));
+
+        // The helper really starts the given command, arguments with spaces intact
+        string ps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+        if(!File.Exists(ps)) { T("powershell not available (skipped)", true); return; }
+        using(var f = new TestFolders()) {
+            string dir = Path.Combine(f.Root, "with space");
+            Directory.CreateDirectory(dir);
+            string target = Path.Combine(dir, "target.ps1"), output = Path.Combine(dir, "out file.txt");
+            File.WriteAllText(target, "[IO.File]::WriteAllText($args[0], ($args[1..($args.Count-1)] -join '|'))");
+            string relaunchSpec = HelperScript.RelaunchSpec(ps, new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", target, output, "a b", "c" });
+
+            string journalPath = Path.Combine(f.Root, "journal", "session.json");
+            new SwapJournal { mode = SwapMode.Temporary }.SaveTo(journalPath);
+            string script = Path.Combine(f.Root, "helper.ps1"), log = Path.Combine(f.Root, "helper.log");
+            File.WriteAllText(script, HelperScript.Script());
+            var helper = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ps,
+                "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" -GamePid 0 -AmpDll \"" + typeof(JournalApplier).Assembly.Location + "\" -JsonDll \"" + typeof(Newtonsoft.Json.JsonConvert).Assembly.Location
+                + "\" -Journal \"" + journalPath + "\" -Mods \"" + f.Mods + "\" -Cache \"" + f.Cache + "\" -Action apply -Relaunch 1 -Log \"" + log + "\" -RelaunchSpec " + relaunchSpec) { CreateNoWindow = true, UseShellExecute = false });
+            helper.WaitForExit(60000);
+            DateTime until = DateTime.UtcNow.AddSeconds(30);
+            while(!File.Exists(output) && DateTime.UtcNow < until) System.Threading.Thread.Sleep(200);
+            string text = File.Exists(output) ? File.ReadAllText(output) : "(no output)";
+            T("the helper relaunches with the test command line (" + text + ")", text == "a b|c");
+            string logText = File.Exists(log) ? File.ReadAllText(log) : "";
+            T("...and says so in its log", logText.Contains("relaunched (test command)") && !logText.Contains("steam://"));
         }
     }
 }

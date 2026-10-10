@@ -329,7 +329,7 @@ namespace AMP.ModSync {
         }
 
         // Same rule the book uses for joining: a loaded level that isn't the menu, character select or a dungeon, with the player spawned
-        private static bool InPlayableLevel() {
+        internal static bool InPlayableLevel() {
             if(Level.current == null || !Level.current.loaded || Level.current.data == null || Level.current.data.id == null) return false;
             string id = Level.current.data.id;
             if(id == "CharacterSelection" || id == "MainMenu" || id.StartsWith("Dungeon")) return false;
@@ -396,8 +396,10 @@ namespace AMP.ModSync {
             CleanOldRuns(runFolder);
 
             string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+            // End-to-end tests started the game through Steam with test arguments: the relaunch has to do the same
+            string relaunchSpec = relaunch && Autopilot.Active ? Autopilot.RelaunchSpec() : null;
             string arguments = HelperScript.LauncherArguments(script, Process.GetCurrentProcess().Id, ampCopy, jsonCopy, JournalPath,
-                                                              ModSyncPaths.ModsFolder, ModSyncPaths.CacheFolder, action, relaunch, Path.Combine(HelperFolder, "helper.log"));
+                                                              ModSyncPaths.ModsFolder, ModSyncPaths.CacheFolder, action, relaunch, Path.Combine(HelperFolder, "helper.log"), relaunchSpec);
             Process launcher = Process.Start(new ProcessStartInfo(powershell, arguments) { UseShellExecute = false, CreateNoWindow = true });
             helperLaunched = true;
             return launcher;

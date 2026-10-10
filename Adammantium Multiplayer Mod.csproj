@@ -266,6 +266,8 @@
     <Compile Include="ModSync\ProfileSwitch.cs" />
     <Compile Include="ModSync\ReleaseInfo.cs" />
     <Compile Include="ModSync\ReleasePackage.cs" />
+    <Compile Include="ModSync\Autopilot.cs" />
+    <Compile Include="ModSync\AutopilotScript.cs" />
     <Compile Include="ModSync\ReleaseUpdater.cs" />
     <Compile Include="Network\Packets\Implementation\ItemSpawnPacket.cs" />
     <Compile Include="Network\Packets\Implementation\LevelChangePacket.cs" />
