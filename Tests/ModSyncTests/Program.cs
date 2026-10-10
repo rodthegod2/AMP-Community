@@ -18,6 +18,7 @@ internal static class Program {
         SettingsTests();
         TransferRulesTests();
         TransferLoopTests();
+        CacheTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -103,6 +104,45 @@ internal static class Program {
             System.Threading.Thread.Sleep(100);
             cancelSender.Cancel();
             T("cancel stops a waiting sender quickly", thread.Join(2000));
+        }
+    }
+
+    private static void CacheTests() {
+        using(var f = new TestFolders()) {
+            string mod = f.Mod("Cached");
+            f.File_(mod, "Items/a.json", "{\"a\":1}");
+            ModEntry entry = ModInventory.Scan(f.Mods, f.Cache, true).Single(m => m.folder == "Cached");
+            var cache = new ModCache(Path.Combine(f.Root, "cacheroot"));
+
+            string staging = cache.NewStagingFolder();
+            foreach(TransferFile file in TransferRules.ListTransferFiles(mod)) {
+                string dst = Path.Combine(staging, file.path);
+                Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                File.Copy(Path.Combine(mod, file.path), dst);
+            }
+            CacheEntry committed = cache.Commit(staging, entry);
+            T("matching hash is committed", committed != null && committed.hash == entry.hash);
+            T("staging folder is gone after commit", !Directory.Exists(staging));
+            T("committed entry is found by hash", cache.Find(entry.hash) != null && Directory.Exists(cache.ContentFolder(entry.hash)));
+
+            string bad = cache.NewStagingFolder();
+            File.WriteAllText(Path.Combine(bad, "manifest.json"), "{}");
+            T("wrong content is rejected and deleted", cache.Commit(bad, entry) == null && !Directory.Exists(bad));
+
+            string again = cache.NewStagingFolder();
+            File.Copy(Path.Combine(mod, "manifest.json"), Path.Combine(again, "manifest.json"));
+            Directory.CreateDirectory(Path.Combine(again, "Items"));
+            File.Copy(Path.Combine(mod, "Items", "a.json"), Path.Combine(again, "Items", "a.json"));
+            T("committing an already cached hash keeps one copy", cache.Commit(again, entry) != null && !Directory.Exists(again));
+
+            cache.Evict(0, new[] { entry.hash });
+            T("protected entries survive eviction", cache.Find(entry.hash) != null);
+            cache.Evict(0, new string[0]);
+            T("eviction removes entries over the limit", cache.Find(entry.hash) == null);
+
+            Directory.CreateDirectory(cache.NewStagingFolder());
+            cache.CleanPartial();
+            T("leftover partial downloads are cleaned", !Directory.EnumerateDirectories(Path.Combine(f.Root, "cacheroot", "partial")).Any());
         }
     }
 
