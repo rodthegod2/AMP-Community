@@ -35,6 +35,7 @@ namespace AmpBot {
         public List<OptionValue> sendSnapshot = new List<OptionValue>();   // sent to every greeted joiner
         public List<string> reports = new List<string>();     // JOINER_REPORT statuses that must arrive, in this order (checking excluded)
         public List<string> served = new List<string>();      // folders that must have been sent completely
+        public List<string> notServed = new List<string>();   // folders the joiner must not ask for (it gets them from mod.io)
         public int greetings = 1;          // joiners that must have been greeted
 
         public static Expectations Load(string path) {

@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using ThunderRoad;
 using UnityEngine;
 using ClientType = AMP.Network.Client.Client;
@@ -37,7 +38,7 @@ namespace AMP.ModSync {
             get { return journal != null && (journal.state == SwapState.Applied || journal.state == SwapState.RestorePending); }
         }
 
-        // PC only; the host's files are the source for everything (the host has them, mod.io isn't needed in this phase)
+        // PC only, Windows host: the host has every file (mod.io mods are fetched from mod.io first when it serves the host's version)
         internal static bool CanDownload(SyncPlan plan) {
             HostModSet set = ModSyncClient.HostSet;
             if(plan == null || set == null || !ModSyncPaths.Available || ModSyncPaths.Platform != "windows") return false;
@@ -73,6 +74,53 @@ namespace AMP.ModSync {
             Progress("Asking the host for the mods...");
 
             List<ModEntry> mods = plan.Of(SyncAction.Replace).Concat(plan.Of(SyncAction.Add)).Select(s => s.hostMod).ToList();
+            List<ModEntry> fromModio = plan.Of(SyncAction.Add).Where(s => s.source == "modio" && s.hostMod.modioId > 0 && !s.hostMod.isAmp).Select(s => s.hostMod).ToList();
+            // mod.io first; whatever it couldn't deliver as the host's version comes from the host (mods already in the cache are skipped there)
+            ModManager.instance.StartCoroutine(FetchFromModio(fromModio, current, () => DownloadFromHost(plan, set, mode, mods, current)));
+        }
+
+        // Host mods that came from mod.io are downloaded from mod.io, one after the other. mod.io only serves a mod's latest file, so a download
+        // only counts when its files hash exactly like the host's copy: then it goes into the cache under the host's hash. Anything else
+        // (another version, mod.io unreachable, too big) is dropped and the host sends that mod instead. Never writes id.modio.
+        private static IEnumerator FetchFromModio(List<ModEntry> mods, int current, Action next) {
+            var cache = new ModCache(ModSyncPaths.CacheFolder);
+            long cacheBytes = Math.Max(0, ModManager.safeFile.modSettings.modCacheMaxMB) * 1024L * 1024L;
+            foreach(ModEntry mod in mods) {
+                if(attempt != current) yield break;
+                if(cache.Find(mod.hash) != null) continue;
+
+                long maxBytes = mod.sizeBytes * 2 + 1024 * 1024; // the same limit as a transfer from the host
+                if(cacheBytes > 0) maxBytes = Math.Min(maxBytes, cacheBytes);
+                string name = mod.name;
+                Progress("Downloading " + name + " from mod.io...");
+                ModioClient.DownloadResult download = null;
+                string crashed = null;
+                yield return ModioClient.Guarded(ModioClient.Download(mod.modioId, cache, maxBytes,
+                    p => { if(attempt == current) Progress("Downloading " + name + " from mod.io...\n" + (int) (p * 100) + "%"); },
+                    () => attempt == current, r => download = r), e => crashed = e.GetType().Name + ": " + e.Message);
+                if(attempt != current) yield break;
+                if(download == null || download.error != null) {
+                    Log.Warn(Defines.CLIENT, "Mod sync: " + name + " (mod.io " + mod.modioId + ") comes from the host instead: " + (download == null ? crashed ?? "the download stopped" : download.error));
+                    continue;
+                }
+
+                string actualHash = null;
+                ModEntry expected = mod;
+                Task<CacheEntry> commit = Task.Run(() => cache.Commit(download.folder, expected, download.fileId, out actualHash)); // hashing: off the main thread
+                while(!commit.IsCompleted) yield return null;
+                ModioClient.TryDelete(download.root);
+                string file = "file " + download.fileId + " (" + download.fileName + ", version " + download.version + ")";
+                if(commit.IsFaulted || commit.Result == null) {
+                    Log.Warn(Defines.CLIENT, "Mod sync: the mod.io " + file + " of " + name + " isn't the host's version ("
+                        + (commit.IsFaulted ? commit.Exception.GetBaseException().Message : "hash " + actualHash + ", host " + mod.hash) + "); the host sends it instead.");
+                    continue;
+                }
+                Log.Info(Defines.CLIENT, "Mod sync: " + name + " downloaded from mod.io " + file + ", same files as the host's.");
+            }
+            if(attempt == current) next();
+        }
+
+        private static void DownloadFromHost(SyncPlan plan, HostModSet set, SwapMode mode, List<ModEntry> mods, int current) {
             ModTransferClient.Download(mods,
                 (received, total, name) => {
                     if(attempt == current) Progress("Downloading " + name + "...\n" + SyncPlan.Megabytes(received) + " of " + SyncPlan.Megabytes(total));

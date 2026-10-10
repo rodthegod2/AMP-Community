@@ -431,9 +431,11 @@ namespace AMP.ModSync {
             var cache = new ModCache(ModSyncPaths.CacheFolder);
             ModioClient.DownloadResult download = null;
             float lastLogged = -1f;
-            yield return ModioClient.Download(step.Int("id"), cache, 512L * 1024 * 1024,
+            string crashed = null;
+            yield return ModioClient.Guarded(ModioClient.Download(step.Int("id"), cache, 512L * 1024 * 1024,
                 p => { if(p - lastLogged >= 0.25f) { lastLogged = p; Debug.Log(Prefix + "INFO mod.io download " + (int) (p * 100) + "%"); } },
-                () => true, r => download = r);
+                () => true, r => download = r), e => crashed = e.GetType().Name + ": " + e.Message);
+            if(download == null) { failure = "the download crashed: " + crashed; yield break; }
             if(download.error != null) { failure = download.error; yield break; }
 
             string folderName = Path.GetFileName(download.folder);

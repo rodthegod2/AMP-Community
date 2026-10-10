@@ -198,6 +198,21 @@ namespace AMP.ModSync {
             done(result);
         }
 
+        // Runs a nested coroutine so that an exception in it ends only it (reported to failed) and not the coroutine that waits for it
+        internal static IEnumerator Guarded(IEnumerator inner, Action<Exception> failed) {
+            while(true) {
+                object current;
+                try {
+                    if(!inner.MoveNext()) yield break;
+                    current = inner.Current;
+                } catch(Exception e) {
+                    failed(e);
+                    yield break;
+                }
+                yield return current;
+            }
+        }
+
         internal static void TryDelete(string dir) {
             if(string.IsNullOrEmpty(dir)) return;
             Task.Run(() => {

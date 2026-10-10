@@ -219,6 +219,7 @@ namespace AmpBot {
             if(request == null || request.folders == null) return;
             List<ModEntry> mods = request.folders.Distinct().Select(f => hostMods.FirstOrDefault(m => m.folder == f)).Where(m => m != null).ToList();
             Out.Info("client " + c.ClientId + " requests " + string.Join(", ", request.folders));
+            foreach(string folder in request.folders.Intersect(x.notServed)) list.Fail("the joiner asked the host for " + folder + ", which must come from mod.io");
             var upload = new Upload();
             uploads[c.ClientId] = upload;
             new Thread(() => Send(c, requestId, upload, mods)) { IsBackground = true, Name = "upload " + c.ClientId }.Start();
