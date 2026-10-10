@@ -54,7 +54,7 @@ namespace AMP.Network.Packets.Implementation {
 
                 Log.Debug(Defines.SERVER, $"Broke item {ind.dataId} by {client.ClientName}.");
 
-                server.SendToAllExcept(this, client.ClientId);
+                server.SendToPlayingExcept(this, client.ClientId);
             }
             return true;
         }

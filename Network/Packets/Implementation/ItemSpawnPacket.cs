@@ -157,7 +157,7 @@ namespace AMP.Network.Packets.Implementation {
 
             ind.clientsideId = 0;
 
-            server.SendToAllExcept(new ItemSpawnPacket(ind), client.ClientId);
+            server.SendToPlayingExcept(new ItemSpawnPacket(ind), client.ClientId);
 
             ServerEvents.InvokeOnItemSpawned(ind, client);
 

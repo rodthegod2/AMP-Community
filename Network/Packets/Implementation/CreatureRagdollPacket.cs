@@ -99,7 +99,7 @@ namespace AMP.Network.Packets.Implementation {
                 CreatureNetworkData cnd = ModManager.serverInstance.creatures[creatureId];
                 cnd.Apply(this);
 
-                server.SendToAllExcept(this, client.ClientId);
+                server.SendToPlayingExcept(this, client.ClientId);
             }
             return true;
         }

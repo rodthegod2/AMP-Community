@@ -47,7 +47,7 @@ namespace AMP.Network.Packets.Implementation {
                 ind.Apply(this);
 
                 Log.Debug(Defines.SERVER, $"Snapped item {ind.dataId} to {ind.holdingStatesInfo}.");
-                server.SendToAllExcept(this, client.ClientId);
+                server.SendToPlayingExcept(this, client.ClientId);
             }
             return true;
         }

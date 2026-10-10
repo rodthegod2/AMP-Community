@@ -57,12 +57,12 @@ namespace AMP.Network.Packets.Implementation {
 
             // Check vote threshold
             if (votes >= requiredVotes) {
-                ModManager.serverInstance.netamiteServer.SendToAll(
+                ModManager.serverInstance.netamiteServer.SendToPlaying(
                     new DisplayTextPacket("votekick", $"{target.ClientName} has been voted out.", Color.yellow, new Vector3(0, 0, 2), true, true, 5)
                 );
                 target.TempBan("You have been votekicked!");
             } else {
-                ModManager.serverInstance.netamiteServer.SendToAll(
+                ModManager.serverInstance.netamiteServer.SendToPlaying(
                     new DisplayTextPacket("votekick", $"Votekick for {target.ClientName} started.\n{votes} / {requiredVotes} Votes", Color.yellow, new Vector3(0, 0, 2), true, true, 5)
                 );
             }

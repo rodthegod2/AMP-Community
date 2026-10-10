@@ -52,7 +52,7 @@ namespace AMP.Network.Packets.Implementation {
                 EntityNetworkData end = ModManager.serverInstance.entities[entityId];
                 end.Apply(this);
 
-                server.SendToAllExcept(this, client.ClientId);
+                server.SendToPlayingExcept(this, client.ClientId);
             }
             return true;
         }

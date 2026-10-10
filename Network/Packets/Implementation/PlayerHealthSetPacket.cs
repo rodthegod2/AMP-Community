@@ -40,9 +40,9 @@ namespace AMP.Network.Packets.Implementation {
 
             #if DEBUG_SELF
             // Just for debug to see yourself
-            server.SendToAll(new PlayerHealthSetPacket(client.player));
+            server.SendToPlaying(new PlayerHealthSetPacket(client.player));
             #else
-            server.SendToAllExcept(new PlayerHealthSetPacket(client.player), client.ClientId);
+            server.SendToPlayingExcept(new PlayerHealthSetPacket(client.player), client.ClientId);
             #endif
             return true;
         }

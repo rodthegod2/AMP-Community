@@ -47,7 +47,7 @@ namespace AMP.Network.Packets.Implementation {
                 
                 ServerEvents.InvokeOnCreatureKilled(cnd, client);
                 
-                server.SendToAllExcept(this, client.ClientId);
+                server.SendToPlayingExcept(this, client.ClientId);
             }
             return true;
         }

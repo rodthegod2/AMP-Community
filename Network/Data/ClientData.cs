@@ -150,7 +150,7 @@ namespace AMP.Network.Data {
         }
 
         public void SetOwnNametagVisibility(bool is_visible) {
-            ModManager.serverInstance.netamiteServer.SendToAllExcept(new NametagVisibilityPacket(is_visible, ClientId), ClientId);
+            ModManager.serverInstance.netamiteServer.SendToPlayingExcept(new NametagVisibilityPacket(is_visible, ClientId), ClientId);
         }
         
         public void SetPlayerNametagVisibility(ClientData client, bool is_visible) {

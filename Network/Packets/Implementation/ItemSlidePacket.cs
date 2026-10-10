@@ -43,7 +43,7 @@ namespace AMP.Network.Packets.Implementation {
 
                 ind.Apply(this);
 
-                server.SendToAllExcept(this, client.ClientId);
+                server.SendToPlayingExcept(this, client.ClientId);
             }
             return true;
         }

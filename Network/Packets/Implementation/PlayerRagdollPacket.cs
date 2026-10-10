@@ -133,9 +133,9 @@ namespace AMP.Network.Packets.Implementation {
 
             #if DEBUG_SELF
             // Just for debug to see yourself
-            server.SendToAll(this);
+            server.SendToPlaying(this);
             #else
-            server.SendToAllExcept(this, client.ClientId);
+            server.SendToPlayingExcept(this, client.ClientId);
             #endif
             return true;
         }

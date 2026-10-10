@@ -124,7 +124,7 @@ namespace AMP.Network.Packets.Implementation {
 
                 if(eventTime == EventTime.OnStart) {
                     Log.Info(Defines.SERVER, $"{client.ClientName} started to load level {level} with mode {mode}.");
-                    server.SendToAllExcept(new PrepareLevelChangePacket(client.ClientName, level, mode), client.ClientId);
+                    server.SendToPlayingExcept(new PrepareLevelChangePacket(client.ClientName, level, mode), client.ClientId);
 
                     // Dont send that stuff if we dont have the seed yet
                     if(LevelInfo.SameOptions(ModManager.serverInstance.currentOptions, option_dict, true)) {
@@ -135,8 +135,8 @@ namespace AMP.Network.Packets.Implementation {
                         }
                         
                         ModManager.serverInstance.ClearItemsAndCreatures();
-                        server.SendToAll(new AllowTransmissionPacket(false));
-                        //server.SendToAllExcept(new ClearPacket(true, true, false), client.ClientId);
+                        server.SendToPlaying(new AllowTransmissionPacket(false));
+                        //server.SendToPlayingExcept(new ClearPacket(true, true, false), client.ClientId);
                         //server.SendTo(client, new ClearPacket(true, true, false));
                     }
                 } else {
@@ -147,7 +147,7 @@ namespace AMP.Network.Packets.Implementation {
 
                     ModManager.serverInstance.ClearItemsAndCreatures();
 
-                    server.SendToAllExcept(this, client.ClientId);
+                    server.SendToPlayingExcept(this, client.ClientId);
                     server.SendTo(client, new AllowTransmissionPacket(true));
 
                     client.LoadedLevel = true; // this branch returns before the OnEnd handling below

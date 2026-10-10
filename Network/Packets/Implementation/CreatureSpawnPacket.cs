@@ -112,7 +112,7 @@ namespace AMP.Network.Packets.Implementation {
                 
                 cnd.clientsideId = 0;
                 
-                server.SendToAllExcept(new CreatureSpawnPacket(cnd), client.ClientId);
+                server.SendToPlayingExcept(new CreatureSpawnPacket(cnd), client.ClientId);
                 
                 ServerEvents.InvokeOnCreatureSpawned(cnd, client);
                 

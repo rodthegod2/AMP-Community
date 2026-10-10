@@ -84,9 +84,9 @@ namespace AMP.Network.Packets.Implementation {
 
             #if DEBUG_SELF
             // Just for debug to see yourself
-            server.SendToAll(new PlayerPositionPacket(client.player));//, client.ClientId);
+            server.SendToPlaying(new PlayerPositionPacket(client.player));//, client.ClientId);
             #else
-            server.SendToAllExcept(new PlayerPositionPacket(client.player), client.ClientId);
+            server.SendToPlayingExcept(new PlayerPositionPacket(client.player), client.ClientId);
             #endif
             return true;
         }

@@ -48,7 +48,7 @@ namespace AMP.Network.Packets.Implementation {
 
                 Log.Debug(Defines.SERVER, $"{client.ClientName} has despawned item {ind.dataId} ({ind.networkedId})");
 
-                server.SendToAllExcept(this, client.ClientId);
+                server.SendToPlayingExcept(this, client.ClientId);
 
                 ModManager.serverInstance.items.TryRemove(itemId, out _);
                 ModManager.serverInstance.item_owner.TryRemove(itemId, out _);

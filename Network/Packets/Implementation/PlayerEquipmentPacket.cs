@@ -61,9 +61,9 @@ namespace AMP.Network.Packets.Implementation {
 
             #if DEBUG_SELF
             // Just for debug to see yourself
-            server.SendToAll(new PlayerEquipmentPacket(client.player));
+            server.SendToPlaying(new PlayerEquipmentPacket(client.player));
             #else
-            server.SendToAllExcept(new PlayerEquipmentPacket(client.player), client.ClientId);
+            server.SendToPlayingExcept(new PlayerEquipmentPacket(client.player), client.ClientId);
             #endif
             return true;
         }

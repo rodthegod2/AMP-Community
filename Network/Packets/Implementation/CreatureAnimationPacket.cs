@@ -37,7 +37,7 @@ namespace AMP.Network.Packets.Implementation {
             if(ModManager.serverInstance.creatures.ContainsKey(creatureId)) {
                 if(!ModManager.serverInstance.creature_owner.TryGetValue(creatureId, out int creatureOwnerId) || creatureOwnerId != client.ClientId) return true;
 
-                server.SendToAllExcept(this, client.ClientId);
+                server.SendToPlayingExcept(this, client.ClientId);
             }
             return true;
         }

@@ -39,7 +39,7 @@ namespace AMP.Network.Packets.Implementation {
         }
 
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
-            server.SendToAllExcept(this, client.ClientId); // Just forward them atm
+            server.SendToPlayingExcept(this, client.ClientId); // Just forward them atm
             return true;
         }
     }

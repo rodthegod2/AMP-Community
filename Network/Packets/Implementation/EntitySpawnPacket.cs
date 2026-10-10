@@ -70,7 +70,7 @@ namespace AMP.Network.Packets.Implementation {
 
             end.clientsideId = 0;
 
-            server.SendToAllExcept(new EntitySpawnPacket(end), client.ClientId);
+            server.SendToPlayingExcept(new EntitySpawnPacket(end), client.ClientId);
             return true;
         }
     }

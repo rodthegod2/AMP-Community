@@ -251,7 +251,7 @@ namespace AMP.Network.Server {
             item_owner[itemNetworkData.networkedId] = newOwner.ClientId;
 
             netamiteServer.SendTo(newOwner, new ItemOwnerPacket(itemNetworkData.networkedId, true));
-            netamiteServer.SendToAllExcept(new ItemOwnerPacket(itemNetworkData.networkedId, false), newOwner.ClientId);
+            netamiteServer.SendToPlayingExcept(new ItemOwnerPacket(itemNetworkData.networkedId, false), newOwner.ClientId);
 
             if(oldOwnerId != newOwner.ClientId) {
                 if(oldOwnerId > 0)
@@ -297,7 +297,7 @@ namespace AMP.Network.Server {
             creatureNetworkData.staticOwner = staticOwner;
 
             netamiteServer.SendTo(newOwner, new CreatureOwnerPacket(creatureNetworkData.networkedId, true, staticOwner));
-            netamiteServer.SendToAllExcept(new CreatureOwnerPacket(creatureNetworkData.networkedId, false, staticOwner), newOwner.ClientId);
+            netamiteServer.SendToPlayingExcept(new CreatureOwnerPacket(creatureNetworkData.networkedId, false, staticOwner), newOwner.ClientId);
 
             List<ItemNetworkData> holdingItems = items.Values.Where(ind => ind.holdingStates != null && ind.holdingStates.Where(state => state.holderNetworkId == creatureNetworkData.networkedId).Count() > 0).ToList();
             foreach(ItemNetworkData item in holdingItems) {

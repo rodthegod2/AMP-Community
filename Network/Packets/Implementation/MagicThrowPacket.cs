@@ -55,7 +55,7 @@ namespace AMP.Network.Packets.Implementation {
             currentCharge = Mathf.Clamp01(currentCharge);
             velocity      = Vector3.ClampMagnitude(velocity, MAX_VELOCITY);
 
-            server.SendToAllExcept(this, client.ClientId);
+            server.SendToPlayingExcept(this, client.ClientId);
             return true;
         }
 

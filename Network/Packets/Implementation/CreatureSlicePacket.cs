@@ -64,7 +64,7 @@ namespace AMP.Network.Packets.Implementation {
 
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             if(ModManager.serverInstance.creatures.ContainsKey(creatureId)) {
-                server.SendToAllExcept(this, client.ClientId);
+                server.SendToPlayingExcept(this, client.ClientId);
             }
             return true;
         }

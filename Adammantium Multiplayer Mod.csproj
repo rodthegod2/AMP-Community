@@ -211,6 +211,7 @@
     <Compile Include="Network\Data\SyncData.cs" />
     <Compile Include="Network\Data\Sync\ItemNetworkData.cs" />
     <Compile Include="Network\Helper\NetworkUtil.cs" />
+    <Compile Include="Network\Broadcast.cs" />
     <Compile Include="Network\NetworkStats.cs" />
     <Compile Include="Network\Packets\AMPPacket.cs" />
     <Compile Include="Network\Packets\EntityPositionPacket.cs" />

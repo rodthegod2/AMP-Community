@@ -47,7 +47,7 @@ namespace AMP.Network.Packets.Implementation {
                 CreatureNetworkData cnd = ModManager.serverInstance.creatures[creatureId];
 
                 Log.Debug(Defines.SERVER, $"{client.ClientName} has despawned creature {cnd.creatureType} ({cnd.networkedId})");
-                server.SendToAllExcept(this, client.ClientId);
+                server.SendToPlayingExcept(this, client.ClientId);
 
                 ModManager.serverInstance.creatures.TryRemove(creatureId, out _);
                 ModManager.serverInstance.creature_owner.TryRemove(creatureId, out _);
