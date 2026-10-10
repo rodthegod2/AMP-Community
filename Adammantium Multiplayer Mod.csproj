@@ -262,6 +262,7 @@
     <Compile Include="ModSync\SettingsSyncClient.cs" />
     <Compile Include="ModSync\SettingsSyncHost.cs" />
     <Compile Include="ModSync\ProfileSeeder.cs" />
+    <Compile Include="ModSync\ProfileSwitch.cs" />
     <Compile Include="Network\Packets\Implementation\ItemSpawnPacket.cs" />
     <Compile Include="Network\Packets\Implementation\LevelChangePacket.cs" />
     <Compile Include="Network\Packets\Implementation\CreatureSpawnPacket.cs" />

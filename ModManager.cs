@@ -111,6 +111,7 @@ namespace AMP {
             } catch(Exception e) {
                 Log.Err(Defines.AMP, "Mod sync unavailable: " + e.Message);
             }
+            ModSync.ProfileSwitch.ApplyAtStartup(); // before the settings snapshot, so it reads the multiplayer profile's options
             StartCoroutine(ModSync.SettingsSyncClient.StartupRoutine());
             if(safeFile.modSettings.useBrowserIntegration) {
                 WebSocketInteractor.Start();

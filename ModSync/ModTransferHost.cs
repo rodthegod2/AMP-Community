@@ -105,9 +105,11 @@ namespace AMP.ModSync {
                 return;
             }
 
-            // Only folders from the host's own scan, never AMP itself, in the order asked; names are matched, not used as paths
+            // Only folders from the host's own scan, in the order asked; names are matched, not used as paths.
+            // AMP itself is served only to a joiner on the same platform (a PC build is useless on Quest).
+            bool servesAmp = ModSyncPaths.Platform == "windows" && string.Equals(client.modSyncPlatform, ModSyncPaths.Platform, StringComparison.OrdinalIgnoreCase);
             List<ModEntry> mods = request.folders.Where(f => f != null).Take(hostMods.Count).Distinct()
-                .Select(f => hostMods.FirstOrDefault(m => m.folder == f && !m.isAmp))
+                .Select(f => hostMods.FirstOrDefault(m => m.folder == f && (servesAmp || !m.isAmp)))
                 .Where(m => m != null).ToList();
             if(mods.Count == 0) {
                 SendEnd(server, client, packet.transferId, 0, false, "The host doesn't offer these mods.");

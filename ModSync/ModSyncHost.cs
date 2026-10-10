@@ -139,6 +139,7 @@ namespace AMP.ModSync {
                 return;
             }
             if(report == null) return;
+            client.modSyncPlatform = report.platform ?? "";
 
             ServerType server = ModManager.serverInstance;
             if(report.status == JoinerStatus.Ready) {

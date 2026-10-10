@@ -1577,6 +1577,11 @@ namespace AMP.UI {
                     break;
                 }
                 case Page.WARNING: {
+                    #if AMP
+                    warningMessage.text = ModSync.ProfileSwitch.Active
+                        ? "This mod is experimental!\nMultiplayer profile (separate characters) - your own saves are untouched."
+                        : "This mod is experimental! It will mess with your save file, so make sure you use a separate save when using multiplayer!";
+                    #endif
                     buttonBar.gameObject.SetActive(false);
                     warningPanel.gameObject.SetActive(true);
                     break;
@@ -1722,6 +1727,7 @@ namespace AMP.UI {
                     #endif
                         info = $"[ Client {Defines.FULL_MOD_VERSION} @ {ModManager.guiManager.join_ip}:{ModManager.guiManager.join_port} ]";
                 }
+                if(ModSync.ProfileSwitch.Active) info += "\nMultiplayer profile (separate characters) - your own saves are untouched.";
                 serverInfoMessage.text = info;
 
                 #if DEBUG
@@ -2935,7 +2941,7 @@ namespace AMP.UI {
             string note = "\n\n" + (swapMode == ModSync.SwapMode.Temporary
                 ? "Temporary: your own mods come back when you quit the game."
                 : "Keep: the host's mods stay installed. \"Restore my mods\" undoes it.");
-            note += "\nCharacters keep items only from mods that are installed — use a separate character for multiplayer.";
+            note += "\nYour characters are kept safe: multiplayer uses a copy of your saves.";
             if(ModSync.ModSwapClient.LastError.Length > 0) note += "\n\n" + ModSync.ModSwapClient.LastError;
             return note;
         }
