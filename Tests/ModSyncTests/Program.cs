@@ -20,6 +20,7 @@ internal static class Program {
         TransferLoopTests();
         CacheTests();
         HardeningTests();
+        JournalTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -250,6 +251,29 @@ internal static class Program {
             }
             T("id too big for a long gives id 0 and the scan doesn't throw", hugeError == null && hugeMod != null && hugeMod.modioId == 0);
         }
+    }
+
+    private static void JournalTests() {
+        var plan = new SyncPlan();
+        plan.steps.Add(new SyncStep { action = SyncAction.Add,     hostMod = M("New", hash: new string('a', 64)), source = "host" });
+        plan.steps.Add(new SyncStep { action = SyncAction.Replace, hostMod = M("Old", hash: new string('b', 64)), localMod = M("Old"), source = "host" });
+        plan.steps.Add(new SyncStep { action = SyncAction.Disable, localMod = M("Extra") });
+        plan.steps.Add(new SyncStep { action = SyncAction.Unavailable, hostMod = M("Nope") });
+        plan.loadOrderDiffers = true;
+
+        SwapJournal j = JournalPlanner.Build(plan, new[] { "Old", "New" }, "1.2.3.4", 26950, "pw", SwapMode.Temporary);
+        T("journal keeps session info", j.host == "1.2.3.4" && j.port == 26950 && j.password == "pw" && j.mode == SwapMode.Temporary && j.state == SwapState.Planned);
+        T("disable op", j.ops.Any(o => o.kind == SwapOpKind.Disable && o.folder == "Extra"));
+        T("replace = move aside then install", j.ops.FindIndex(o => o.kind == SwapOpKind.MoveAside && o.folder == "Old") < j.ops.FindIndex(o => o.kind == SwapOpKind.Install && o.folder == "Old"));
+        T("install op carries the cache hash", j.ops.Any(o => o.kind == SwapOpKind.Install && o.folder == "New" && o.hash == new string('a', 64)));
+        T("unavailable mods produce no op", !j.ops.Any(o => o.folder == "Nope"));
+        T("load order op with host order", j.ops.Any(o => o.kind == SwapOpKind.LoadOrder) && j.hostLoadOrder.SequenceEqual(new[] { "Old", "New" }));
+        T("disables come before installs", j.ops.FindLastIndex(o => o.kind == SwapOpKind.Disable) < j.ops.FindIndex(o => o.kind == SwapOpKind.Install));
+
+        string json = j.ToJson();
+        SwapJournal back = SwapJournal.FromJson(json);
+        T("journal round-trips through JSON", back.ops.Count == j.ops.Count && back.mode == SwapMode.Temporary && back.id == j.id);
+        T("garbage JSON gives null", SwapJournal.FromJson("{not json") == null);
     }
 
     private static ModEntry M(string folder, string hash = "h", long modio = 0, string name = null, bool enabled = true, bool amp = false) {
