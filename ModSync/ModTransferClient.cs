@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using ClientType = AMP.Network.Client.Client;
 
@@ -16,6 +17,7 @@ namespace AMP.ModSync {
     // Disk-heavy work that doesn't need the state (hashing in Commit, eviction) runs outside the lock.
     internal static class ModTransferClient {
         private const int PROGRESS_INTERVAL_MS = 250;
+        private const int IDLE_TIMEOUT_MS = 60 * 1000; // no manifest or chunk for this long while waiting for the host: give up
 
         private static readonly object gate = new object();
         private static readonly MessageAssembler assembler = new MessageAssembler();
@@ -33,6 +35,10 @@ namespace AMP.ModSync {
         private static long totalBytes;
         private static long finishedBytes;                      // bytes of mods already received
         private static DateTime lastProgress;
+        private static int requestId;                          // id of our MODS_REQUEST; the host echoes it in every manifest and end message
+        private static DateTime lastActivity;
+        private static int committing;                         // mods being verified right now: the host is allowed to be quiet then
+        private static Timer idleTimer;
 
         private static TransferReceiver receiver;
         private static ModEntry receiving;
@@ -51,7 +57,7 @@ namespace AMP.ModSync {
 
             var modCache = new ModCache(ModSyncPaths.CacheFolder);
             if(!partialsCleaned) {
-                modCache.CleanPartial();
+                modCache.CleanPartial(TimeSpan.FromHours(1)); // folders of a game instance that is downloading right now are younger
                 partialsCleaned = true;
             }
 
@@ -77,6 +83,8 @@ namespace AMP.ModSync {
                 totalBytes    = needed.Sum(m => m.sizeBytes);
                 finishedBytes = 0;
                 lastProgress  = DateTime.MinValue;
+                lastActivity  = DateTime.UtcNow;
+                committing    = 0;
                 receiver      = null;
                 receiving     = null;
                 staging       = null;
@@ -84,8 +92,15 @@ namespace AMP.ModSync {
             }
 
             string json = JsonConvert.SerializeObject(new ModsRequest { folders = needed.Select(m => m.folder).ToList() });
+            List<ModSyncPacket> packets = ModSyncPacket.Create(ModSyncPacket.MODS_REQUEST, json);
+            lock(gate) {
+                if(!active) return; // cancelled in the meantime
+                requestId = packets[0].transferId;
+                int forSession = session;
+                idleTimer = new Timer(_ => CheckIdle(forSession), null, 5000, 5000);
+            }
             try {
-                foreach(ModSyncPacket packet in ModSyncPacket.Create(ModSyncPacket.MODS_REQUEST, json)) Send(current, packet);
+                foreach(ModSyncPacket packet in packets) Send(current, packet);
             } catch(Exception e) {
                 Log.Err(Defines.CLIENT, "Mod sync: couldn't request the mods. " + e.Message);
                 lock(gate) Finish(false, "Couldn't ask the host for the mods.", false);
@@ -121,7 +136,7 @@ namespace AMP.ModSync {
             }
             if(end == null || end.ok) return; // success is detected by the receiver having every byte
             lock(gate) {
-                if(!IsCurrent()) return;
+                if(!IsCurrent() || end.requestId != requestId) return; // an answer to an older request
                 Finish(false, string.IsNullOrEmpty(end.error) ? "The host stopped the download." : end.error, false);
             }
         }
@@ -130,7 +145,7 @@ namespace AMP.ModSync {
             TransferManifest manifest;
             try {
                 manifest = JsonConvert.DeserializeObject<TransferManifest>(json);
-            } catch(JsonException) {
+            } catch(Exception) { // whatever the host sent, it must not escape into the network thread
                 manifest = null;
             }
 
@@ -143,8 +158,11 @@ namespace AMP.ModSync {
 
             lock(gate) {
                 if(!IsCurrent()) return;
-                ModEntry expected;
+                if(manifest != null && manifest.requestId != requestId) return; // a leftover of an older request must never become active
+                ModEntry expected = null;
+                // The folder name becomes a cache entry field: it must be one we asked for and a plain single folder name
                 if(manifest == null || manifest.folder == null || receiver != null
+                   || TransferRules.NormalizeRelativePath(manifest.folder) != manifest.folder || manifest.folder.Contains("/")
                    || !pending.TryGetValue(manifest.folder, out expected) || manifest.hash != expected.hash) {
                     Finish(false, "The host sent a mod that wasn't asked for.", true);
                     return;
@@ -152,22 +170,18 @@ namespace AMP.ModSync {
 
                 string folder = null;
                 try {
+                    long maxBytes = expected.sizeBytes * 2 + 1024 * 1024;
+                    long cacheBytes = Math.Max(0, ModManager.safeFile.modSettings.modCacheMaxMB) * 1024L * 1024L;
+                    if(cacheBytes > 0) maxBytes = Math.Min(maxBytes, cacheBytes); // a mod that can't fit the cache is not worth receiving
                     folder = cache.NewStagingFolder();
-                    receiver    = TransferReceiver.Start(manifest, folder, expected.sizeBytes * 2 + 1024 * 1024);
+                    receiver    = TransferReceiver.Start(manifest, folder, maxBytes);
                     staging     = folder;
                     receiving   = expected;
                     receivingId = manifest.transferId;
-                } catch(InvalidDataException e) {
-                    TryDelete(folder);
-                    Finish(false, e.Message, true);
-                    return;
-                } catch(IOException e) {
-                    TryDelete(folder);
-                    Finish(false, "Couldn't prepare the download folder. " + e.Message, true);
-                    return;
-                } catch(UnauthorizedAccessException e) {
-                    TryDelete(folder);
-                    Finish(false, "Couldn't prepare the download folder. " + e.Message, true);
+                    lastActivity = DateTime.UtcNow;
+                } catch(Exception e) {
+                    DeleteLater(folder);
+                    Finish(false, e is InvalidDataException ? e.Message : "Couldn't prepare the download folder. " + e.Message, true);
                     return;
                 }
 
@@ -194,11 +208,9 @@ namespace AMP.ModSync {
 
             lock(gate) {
                 if(!IsCurrent() || receiver == null || packet.transferId != receivingId) return;
-                if(string.IsNullOrEmpty(packet.data)) return;
-                byte[] bytes;
-                try {
-                    bytes = Convert.FromBase64String(packet.data);
-                } catch(FormatException) {
+                lastActivity = DateTime.UtcNow;
+                byte[] bytes = TransferRules.DecodeChunk(packet.data); // an empty file arrives as one empty chunk, which must be acknowledged too
+                if(bytes == null) {
                     Finish(false, "The host sent data that isn't a valid file chunk.", true);
                     return;
                 }
@@ -206,10 +218,7 @@ namespace AMP.ModSync {
                 bool accepted;
                 try {
                     accepted = receiver.OnChunk(packet.fileIndex, packet.offset, bytes);
-                } catch(IOException e) {
-                    Finish(false, "Couldn't save the download. " + e.Message, true);
-                    return;
-                } catch(UnauthorizedAccessException e) {
+                } catch(Exception e) {
                     Finish(false, "Couldn't save the download. " + e.Message, true);
                     return;
                 }
@@ -264,6 +273,8 @@ namespace AMP.ModSync {
             List<string> keep = null;
             lock(gate) {
                 if(session != forSession) return; // cancelled meanwhile; whatever was cached stays valid
+                committing--;
+                lastActivity = DateTime.UtcNow;
                 if(entry == null) {
                     Finish(false, mod.name + " failed verification.", true);
                     return;
@@ -300,6 +311,7 @@ namespace AMP.ModSync {
             finished = receiver;
             stagingFolder = staging;
             finishedBytes += finished.TotalBytes;
+            committing++;
             receiver = null;
             receiving = null;
             staging = null;
@@ -323,7 +335,10 @@ namespace AMP.ModSync {
         // Inside the lock: drops the receiver and its half-written files and forgets the download
         private static void Abandon() {
             if(receiver != null) receiver.Dispose();
-            TryDelete(staging);
+            DeleteLater(staging); // recursive deletes don't belong under the lock or on the main thread
+            if(idleTimer != null) idleTimer.Dispose();
+            idleTimer = null;
+            committing = 0;
             session++;
             active = false;
             client = null;
@@ -351,6 +366,20 @@ namespace AMP.ModSync {
         // Straight to the connection this download belongs to, never to whichever one is current by then
         private static void Send(ClientType target, ModSyncPacket packet) {
             target.netclient.SendReliable(packet);
+        }
+
+        private static void DeleteLater(string dir) {
+            if(string.IsNullOrEmpty(dir)) return;
+            Task.Run(() => TryDelete(dir));
+        }
+
+        // Timer thread: the host went quiet while we were waiting for it
+        private static void CheckIdle(int forSession) {
+            lock(gate) {
+                if(!active || session != forSession || committing > 0) return;
+                if((DateTime.UtcNow - lastActivity).TotalMilliseconds < IDLE_TIMEOUT_MS) return;
+                Finish(false, "The host stopped sending the mods.", true);
+            }
         }
 
         private static void TryDelete(string dir) {

@@ -19,6 +19,7 @@ internal static class Program {
         TransferRulesTests();
         TransferLoopTests();
         CacheTests();
+        HardeningTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -104,6 +105,26 @@ internal static class Program {
             System.Threading.Thread.Sleep(100);
             cancelSender.Cancel();
             T("cancel stops a waiting sender quickly", thread.Join(2000));
+        }
+    }
+
+    private static void HardeningTests() {
+        byte[] empty = TransferRules.DecodeChunk("");
+        T("empty chunk decodes to no bytes", empty != null && empty.Length == 0);
+        T("null chunk counts as empty", TransferRules.DecodeChunk(null).Length == 0);
+        T("valid chunk decodes", TransferRules.DecodeChunk(Convert.ToBase64String(new byte[] { 1, 2, 3 })).Length == 3);
+        T("invalid chunk is null", TransferRules.DecodeChunk("not base64!") == null);
+
+        var huge = new TransferManifest { files = { new TransferFile { path = "a", size = long.MaxValue }, new TransferFile { path = "b", size = long.MaxValue } } };
+        using(var f = new TestFolders()) {
+            bool rejected = false;
+            try { TransferReceiver.Start(huge, Path.Combine(f.Root, "stage"), 1000); } catch(InvalidDataException) { rejected = true; }
+            T("sizes that would overflow the sum are rejected", rejected);
+
+            var cache = new ModCache(Path.Combine(f.Root, "cacheroot2"));
+            Directory.CreateDirectory(cache.NewStagingFolder());
+            cache.CleanPartial(TimeSpan.FromHours(1));
+            T("recent partial downloads survive a timed clean", Directory.EnumerateDirectories(Path.Combine(f.Root, "cacheroot2", "partial")).Any());
         }
     }
 

@@ -11,6 +11,7 @@ namespace AMP.ModSync {
 
     // Host -> joiner: one mod folder about to be sent
     public class TransferManifest {
+        public int                requestId; // the joiner's MODS_REQUEST this answers
         public int                transferId;
         public string             folder;
         public string             hash;
@@ -27,6 +28,7 @@ namespace AMP.ModSync {
 
     // Host -> joiner: a transfer finished or failed on the host side
     public class TransferEnd {
+        public int    requestId;
         public int    transferId;
         public bool   ok;
         public string error = "";
@@ -53,6 +55,15 @@ namespace AMP.ModSync {
                 if(ReservedNames.Contains(stem, StringComparer.OrdinalIgnoreCase)) return null;
             }
             return string.Join("/", parts);
+        }
+
+        // A chunk's base64 text from the network; null if it isn't valid. An empty chunk (empty file) is "" and decodes to no bytes.
+        public static byte[] DecodeChunk(string data) {
+            try {
+                return Convert.FromBase64String(data ?? "");
+            } catch(FormatException) {
+                return null;
+            }
         }
 
         public static List<TransferFile> ListTransferFiles(string folder) {

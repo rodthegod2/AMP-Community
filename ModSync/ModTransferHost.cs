@@ -22,6 +22,7 @@ namespace AMP.ModSync {
         private class ActiveUpload {
             public ClientData client;
             public volatile bool cancelled;
+            public int requestId;                 // the joiner's MODS_REQUEST id, echoed in every message of this upload
             public volatile int transferId;
             public volatile TransferSender sender;
             public readonly SemaphoreSlim readyNext = new SemaphoreSlim(0); // released when the joiner has verified a mod
@@ -37,6 +38,8 @@ namespace AMP.ModSync {
         private static readonly ConcurrentDictionary<int, ActiveUpload> uploads = new ConcurrentDictionary<int, ActiveUpload>();
         private static readonly MessageAssembler assembler = new MessageAssembler();
         private static int nextTransferId;
+        private static readonly ConcurrentDictionary<int, int> lastRequestMs = new ConcurrentDictionary<int, int>(); // client -> Environment.TickCount of its last accepted request
+        private const int MIN_REQUEST_GAP_MS = 2000;
 
         // Network thread
         internal static void OnPacket(ClientData client, ModSyncPacket packet) {
@@ -65,12 +68,15 @@ namespace AMP.ModSync {
 
         internal static void OnClientDisconnected(ClientData client) {
             assembler.Forget(client.ClientId + ":");
+            int ignored;
+            lastRequestMs.TryRemove(client.ClientId, out ignored);
             ActiveUpload upload;
             if(uploads.TryRemove(client.ClientId, out upload)) upload.Cancel();
         }
 
         internal static void StopAll() {
             assembler.Forget("");
+            lastRequestMs.Clear();
             foreach(int id in uploads.Keys.ToList()) {
                 ActiveUpload upload;
                 if(uploads.TryRemove(id, out upload)) upload.Cancel();
@@ -95,23 +101,32 @@ namespace AMP.ModSync {
             List<ModEntry> hostMods = ModSyncHost.HostMods;
             string modsFolder = ModSyncHost.HostModsFolder;
             if(server == null || hostMods == null || modsFolder == null) {
-                SendEnd(server, client, 0, false, "The host's mod list isn't ready yet.");
+                SendEnd(server, client, packet.transferId, 0, false, "The host's mod list isn't ready yet.");
                 return;
             }
 
             // Only folders from the host's own scan, never AMP itself, in the order asked; names are matched, not used as paths
-            List<ModEntry> mods = request.folders.Where(f => f != null).Distinct()
+            List<ModEntry> mods = request.folders.Where(f => f != null).Take(hostMods.Count).Distinct()
                 .Select(f => hostMods.FirstOrDefault(m => m.folder == f && !m.isAmp))
                 .Where(m => m != null).ToList();
             if(mods.Count == 0) {
-                SendEnd(server, client, 0, false, "The host doesn't offer these mods.");
+                SendEnd(server, client, packet.transferId, 0, false, "The host doesn't offer these mods.");
                 return;
             }
 
-            var upload = new ActiveUpload { client = client };
+            var upload = new ActiveUpload { client = client, requestId = packet.transferId };
             lock(uploads) {
                 ActiveUpload previous;
-                if(uploads.TryGetValue(client.ClientId, out previous)) previous.Cancel();
+                int now = Environment.TickCount, last;
+                if(lastRequestMs.TryGetValue(client.ClientId, out last) && unchecked(now - last) < MIN_REQUEST_GAP_MS) {
+                    Log.Warn(Defines.SERVER, "Mod sync: ignoring a mod request of " + client.ClientName + ", it came too soon after the last one.");
+                    return;
+                }
+                if(uploads.TryGetValue(client.ClientId, out previous) && !previous.cancelled) {
+                    Log.Warn(Defines.SERVER, "Mod sync: ignoring a mod request of " + client.ClientName + ", a download is already running.");
+                    return;
+                }
+                lastRequestMs[client.ClientId] = now;
                 uploads[client.ClientId] = upload;
             }
 
@@ -136,6 +151,7 @@ namespace AMP.ModSync {
                     currentId = Interlocked.Increment(ref nextTransferId);
                     string folder = Path.Combine(modsFolder, mod.folder);
                     var manifest = new TransferManifest {
+                        requestId  = upload.requestId,
                         transferId = currentId,
                         folder     = mod.folder,
                         hash       = mod.hash,
@@ -144,7 +160,7 @@ namespace AMP.ModSync {
                     };
                     if(manifest.TotalBytes > maxBytes) {
                         Log.Info(Defines.SERVER, $"Mod sync: refusing to send {mod.name} to {client.ClientName}, it is larger than maxModTransferMB.");
-                        SendEnd(server, client, currentId, false, $"{mod.name} is too large for this host's download limit.");
+                        SendEnd(server, client, upload.requestId, currentId, false, $"{mod.name} is too large for this host's download limit.");
                         return;
                     }
 
@@ -160,16 +176,16 @@ namespace AMP.ModSync {
                     }
                     bool ok = sender.Run();
                     if(upload.cancelled) return; // the joiner asked to stop or left: nothing more to say
-                    SendEnd(server, client, currentId, ok, ok ? "" : $"Sending {mod.name} was interrupted.");
+                    SendEnd(server, client, upload.requestId, currentId, ok, ok ? "" : $"Sending {mod.name} was interrupted.");
                     if(!ok) return;
                     if(mod != mods[mods.Count - 1] && !WaitForReady(upload)) {
-                        if(!upload.cancelled) SendEnd(server, client, currentId, false, "Verifying the mod took too long.");
+                        if(!upload.cancelled) SendEnd(server, client, upload.requestId, currentId, false, "Verifying the mod took too long.");
                         return;
                     }
                 }
             } catch(Exception e) {
                 Log.Err(Defines.SERVER, "Mod sync: sending mods to " + client.ClientName + " failed. " + e.Message);
-                if(!upload.cancelled) SendEnd(server, client, currentId, false, "The host couldn't send the mod.");
+                if(!upload.cancelled) SendEnd(server, client, upload.requestId, currentId, false, "The host couldn't send the mod.");
             } finally {
                 // Forget this upload unless a newer one already replaced it
                 ((ICollection<KeyValuePair<int, ActiveUpload>>) uploads).Remove(new KeyValuePair<int, ActiveUpload>(client.ClientId, upload));
@@ -182,10 +198,10 @@ namespace AMP.ModSync {
             return !upload.cancelled;
         }
 
-        private static void SendEnd(ServerType server, ClientData client, int transferId, bool ok, string error) {
+        private static void SendEnd(ServerType server, ClientData client, int requestId, int transferId, bool ok, string error) {
             if(server == null) return;
             try {
-                string json = JsonConvert.SerializeObject(new TransferEnd { transferId = transferId, ok = ok, error = error });
+                string json = JsonConvert.SerializeObject(new TransferEnd { requestId = requestId, transferId = transferId, ok = ok, error = error });
                 foreach(ModSyncPacket packet in ModSyncPacket.Create(ModSyncPacket.TRANSFER_END, json)) {
                     server.netamiteServer.SendTo(client, packet);
                 }

@@ -35,8 +35,13 @@ namespace AMP.ModSync {
             string[] safe = manifest.files.Select(f => f == null ? null : TransferRules.NormalizeRelativePath(f.path)).ToArray();
             if(safe.Any(p => p == null)) throw new InvalidDataException("Unsafe file path in mod.");
             if(safe.Distinct(StringComparer.OrdinalIgnoreCase).Count() != safe.Length) throw new InvalidDataException("Duplicate file in mod.");
-            if(manifest.files.Any(f => f.size < 0)) throw new InvalidDataException("Invalid file size.");
-            if(manifest.TotalBytes > maxBytes) throw new InvalidDataException("Mod is larger than the allowed download size.");
+            // Checked one by one so a hostile list of huge sizes can't overflow the sum
+            long total = 0;
+            foreach(TransferFile file in manifest.files) {
+                if(file.size < 0) throw new InvalidDataException("Invalid file size.");
+                if(file.size > maxBytes || total > maxBytes - file.size) throw new InvalidDataException("Mod is larger than the allowed download size.");
+                total += file.size;
+            }
 
             if(Directory.Exists(stagingFolder)) Directory.Delete(stagingFolder, true);
             Directory.CreateDirectory(stagingFolder);

@@ -45,6 +45,14 @@ namespace AMP.ModSync {
                     return null;
                 }
 
+                // Already cached: keep the existing entry as it is (it was written from a trusted ModEntry), just mark it used
+                CacheEntry existing = Find(hash);
+                if(existing != null) {
+                    Directory.Delete(stagingFolder, true);
+                    Touch(hash);
+                    return existing;
+                }
+
                 string content = ContentFolder(hash);
                 if(Directory.Exists(content)) {
                     Directory.Delete(stagingFolder, true);
@@ -99,13 +107,19 @@ namespace AMP.ModSync {
             foreach(CacheEntry entry in entries.OrderBy(e => e.lastUsedTicks)) {
                 if(total <= maxBytes) break;
                 if(keep != null && keep.Contains(entry.hash)) continue;
+                // entry.json goes first: if the folder delete is interrupted, what's left is no longer found as a valid entry
+                try { File.Delete(EntryFile(entry.hash)); } catch(IOException) { } catch(UnauthorizedAccessException) { }
                 if(TryDelete(Path.Combine(ModsRoot, entry.hash))) total -= entry.sizeBytes;
             }
         }
 
-        public void CleanPartial() {
+        // minAge: leave folders touched more recently alone, they may belong to another running game instance
+        public void CleanPartial(TimeSpan minAge = default(TimeSpan)) {
             if(!Directory.Exists(PartialRoot)) return;
-            foreach(string dir in Directory.GetDirectories(PartialRoot)) TryDelete(dir);
+            foreach(string dir in Directory.GetDirectories(PartialRoot)) {
+                if(DateTime.UtcNow - Directory.GetLastWriteTimeUtc(dir) < minAge) continue;
+                TryDelete(dir);
+            }
         }
 
         // Hashes come from the network: only accept 64 lowercase hex chars as folder names
