@@ -53,6 +53,7 @@
 
         MOD_LIST                    = 110,
         MOD_SYNC,
+        MOD_FILE,
         
         MODERATION_PERMISSION_LEVEL = 120,
         MODERATION_VOTE_KICK,

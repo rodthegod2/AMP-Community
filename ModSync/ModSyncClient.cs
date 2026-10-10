@@ -31,7 +31,8 @@ namespace AMP.ModSync {
         // Main thread, when a new connection starts: nothing of the previous server may leak into it
         internal static void Reset() {
             assembler.Forget("");
-            HostSet        = null;
+            ModTransferClient.Cancel();
+            HostSet       = null;
             Plan           = null;
             awaitingClient = null;
         }

@@ -15,6 +15,11 @@ namespace AMP.Network.Packets.Implementation {
         public const byte JOINER_REPORT = 2;
         public const byte SETTINGS_SNAPSHOT = 3; // host -> joiner, all server-side values, sent when the joiner is greeted
         public const byte SETTING_CHANGED   = 4; // host -> joiners, one value the host just changed
+        public const byte MODS_REQUEST     = 5; // joiner -> host: ModsRequest JSON
+        public const byte TRANSFER_START   = 6; // host -> joiner: TransferManifest JSON
+        public const byte CHUNK_ACK        = 7; // joiner -> host: transferId, no data
+        public const byte TRANSFER_END     = 8; // host -> joiner: TransferEnd JSON
+        public const byte TRANSFER_CANCEL  = 9; // joiner -> host: stop sending
 
         [SyncedVar] public byte   kind;
         [SyncedVar] public int    transferId;
@@ -44,12 +49,14 @@ namespace AMP.Network.Packets.Implementation {
 
         public override bool ProcessClient(NetamiteClient client) {
             if(kind == SETTINGS_SNAPSHOT || kind == SETTING_CHANGED) SettingsSyncClient.OnPacket(this);
+            else if(kind == TRANSFER_START || kind == TRANSFER_END) ModTransferClient.OnPacket(this);
             else ModSyncClient.OnPacket(this);
             return true;
         }
 
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
-            ModSyncHost.OnPacket(client, this);
+            if(kind == MODS_REQUEST || kind == CHUNK_ACK || kind == TRANSFER_CANCEL) ModTransferHost.OnPacket(client, this);
+            else ModSyncHost.OnPacket(client, this);
             return true;
         }
     }

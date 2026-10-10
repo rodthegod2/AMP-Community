@@ -58,7 +58,8 @@ namespace AMP.ModSync {
                     folder        = expected.folder,
                     name          = expected.name,
                     modioId       = expected.modioId,
-                    sizeBytes     = files.Sum(f => new FileInfo(Path.Combine(content, ModInventory.RelativePath(stagingFolder, f))).Length),
+                    sizeBytes     = files.Where(f => ModInventory.IsHashedFile(ModInventory.RelativePath(stagingFolder, f)))
+                                         .Sum(f => new FileInfo(Path.Combine(content, ModInventory.RelativePath(stagingFolder, f))).Length),
                     lastUsedTicks = DateTime.UtcNow.Ticks,
                 };
                 File.WriteAllText(EntryFile(hash), JsonConvert.SerializeObject(entry));

@@ -376,6 +376,7 @@ namespace AMP {
             LevelFunc.SetBookAvailability(true, true);
 
             ModSync.SettingsSyncClient.Restore();
+            ModSync.ModTransferClient.Cancel();
 
             clientInstance?.Disconnect();
             clientSync?.Stop();
@@ -394,6 +395,7 @@ namespace AMP {
         public static void StopHost() {
             if(serverInstance == null) return;
             ModSync.SettingsSyncHost.Stop();
+            ModSync.ModTransferHost.StopAll();
             serverInstance.Stop();
             serverInstance = null;
         }

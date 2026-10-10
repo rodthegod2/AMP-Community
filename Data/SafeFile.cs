@@ -31,6 +31,8 @@ namespace AMP.Data {
             public bool useAdvancedNpcSyncing   = true;
             public bool useSpaceWarMode         = false;
             public float minPredictionTreshhold = 0.15f;
+            // Size limit of the downloaded-mods cache (AMP_ModCache)
+            public int   modCacheMaxMB          = 8192;
             
             public bool ShouldPredict(float compensationFactor) {
                 return ModLoader.ClientsidePrediction && compensationFactor > minPredictionTreshhold;
@@ -62,6 +64,9 @@ namespace AMP.Data {
             public bool     syncModSettings        = true;
             // Force an option to be synced or not: { "<mod folder>/<option name>": "server" | "personal" }
             public Dictionary<string, string> settingOverrides = new Dictionary<string, string>();
+            // Mod downloads from the host: upload speed limit per joiner (KB/s, 0 = unlimited) and largest download a joiner may request
+            public int      modUploadKBps          = 4096;
+            public int      maxModTransferMB       = 4096;
 
             
             public bool useModWhitelist            = false;

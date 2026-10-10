@@ -248,6 +248,9 @@
     <Compile Include="ModSync\TransferSender.cs" />
     <Compile Include="ModSync\TransferReceiver.cs" />
     <Compile Include="ModSync\ModCache.cs" />
+    <Compile Include="ModSync\Blob.cs" />
+    <Compile Include="ModSync\ModTransferHost.cs" />
+    <Compile Include="ModSync\ModTransferClient.cs" />
     <Compile Include="ModSync\ModSyncClient.cs" />
     <Compile Include="ModSync\ModSyncHost.cs" />
     <Compile Include="ModSync\ModSyncPaths.cs" />
@@ -263,6 +266,7 @@
     <Compile Include="Network\Packets\Implementation\AllowTransmissionPacket.cs" />
     <Compile Include="Network\Packets\Implementation\ModListPacket.cs" />
     <Compile Include="Network\Packets\Implementation\ModSyncPacket.cs" />
+    <Compile Include="Network\Packets\Implementation\ModFilePacket.cs" />
     <Compile Include="Network\Packets\Implementation\PlayerTeleportPacket.cs" />
     <Compile Include="Network\Packets\Implementation\PrepareLevelChangePacket.cs" />
     <Compile Include="Network\Packets\Implementation\ServerInfoPacket.cs" />

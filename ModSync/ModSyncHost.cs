@@ -26,6 +26,11 @@ namespace AMP.ModSync {
         private const string KICKED  = "kicked";
 
         private static Task<string> hostModSetJson;
+
+        // What ModTransferHost may serve: the enabled mods of the last scan (null until it finished) and the folder they live in
+        internal static volatile List<ModEntry> HostMods;
+        internal static volatile string HostModsFolder;
+        private static volatile int prepareGeneration;
         private static string mode = ModSyncMode.Off;
         private static readonly MessageAssembler assembler = new MessageAssembler();
 
@@ -40,6 +45,9 @@ namespace AMP.ModSync {
         // Main thread, before the server starts: settings and paths are read here, the folder scan runs in the background
         internal static void Prepare() {
             hostModSetJson = null;
+            int generation = ++prepareGeneration;
+            HostMods       = null;
+            HostModsFolder = null;
             mode = NormalizeMode(ModManager.safeFile.hostingSettings.modSyncMode);
             if(mode != ModSyncMode.Off && !ModSyncPaths.Available) {
                 Log.Warn(Defines.SERVER, "Mod sync is unavailable (Mods folder not found), hosting without it.");
@@ -57,6 +65,10 @@ namespace AMP.ModSync {
             hostModSetJson = Task.Run(() => {
                 List<ModEntry> mods = ModInventory.Scan(modsFolder, cacheFolder, true);
                 set.mods      = mods.Where(m => m.enabled).ToList();
+                if(generation == prepareGeneration) { // a scan of an earlier hosting session must not overwrite this one's list
+                    HostModsFolder = modsFolder;
+                    HostMods       = set.mods;
+                }
                 set.loadOrder = ModInventory.ReadLoadOrder(modsFolder);
                 ModEntry amp  = mods.FirstOrDefault(m => m.isAmp);
                 set.ampBuild  = amp != null ? amp.hash : "";
@@ -97,6 +109,14 @@ namespace AMP.ModSync {
         // Frees what a half-sent report of this client still occupies
         internal static void OnClientDisconnected(ClientData client) {
             assembler.Forget(client.ClientId + ":");
+            ModTransferHost.OnClientDisconnected(client);
+        }
+
+        // Joiners that are checking or setting up their mods are the ones who may download them
+        internal static bool IsSettingUp(ClientData client) {
+            lock(client.modSyncLock) {
+                return client.modSyncState == CHECKING || client.modSyncState == SETUP;
+            }
         }
 
         // A joiner still going through mod sync is connected but not playing yet: no item/NPC migration, no lobby admin
