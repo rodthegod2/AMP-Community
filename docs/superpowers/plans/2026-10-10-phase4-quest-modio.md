@@ -1,0 +1,39 @@
+# Phase 4 (mod.io Delivery, Nexus→mod.io Matching, Quest Flow) Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax.
+
+**Goal:** Mods can come from mod.io (each platform gets its own build), the host can map Nexus-only mods to mod.io mods that have a Quest build, and a Quest joiner can download, apply in-game, restart and rejoin. Everything that can run on PC is tested in the real game with the E2E harness; Quest-only behaviour is unit-tested and marked unverified until a Quest test.
+
+**Spec:** `docs/superpowers/specs/2026-10-09-mod-sync-design.md` components 4, 5a, 7 (Quest), 9 (Quest note). Research (verified, decompiled SDK in `C:\Projects\bns-mp\decomp\modio`): the game uses the legacy `ModIO` Unity plugin (`modio.UnityPlugin.dll`, static `ModIOUnity` / `ModIOUnityAsync`), game id 3852, initialised lazily by the game's mod browser via `ModIOUnity.InitializeForUser(Environment.UserName)` (config from Resources `mod.io/config`). `GetMod`, `GetMods(SearchFilter)` work without a user; `new ModIO.Util.DownloadModToStreamOperation(modId, stream)` downloads without a user and checks MD5; `ModProfile.platforms` lists `ModPlatform{platform, modfileLive}`; the PC SDK sends platform header "Windows" (`ModIO.Util.Utility.ForceSetPlatformHeader(RestApiPlatform.Android)` exists). The game's mod manager deletes Mods folders whose `id.modio` id isn't subscribed — never write `id.modio` for mods we install.
+
+## Conventions + safety
+As in all previous phases (repo/branch, C# 7.3, csproj entries, `build.sh`, ModSyncTests/packettest/policytest/AmpBot selftest, E2E via `tools/e2e/run-e2e.ps1` with every safety rule of `docs/superpowers/plans/2026-10-10-e2e-harness.md`; one build at a time; never `dotnet build-server shutdown`; never touch real saves/Mods outside the harness; commit identity + trailer naming your model; push to `fork fix/review-pass:community` when green). mod.io network calls in E2E are real (read-only searches/downloads, no login, no subscriptions).
+
+## Tasks
+
+### 1. mod.io access layer (game) + E2E probe
+`ModSync/ModioClient.cs` (main thread, coroutines): `EnsureInitialized()` (if `!ModIOUnity.IsInitialized()` → `InitializeForUser(Environment.UserName)`; don't touch the game's UI or auth), `GetMod(long id, Action<ModProfile>)`, `Search(string phrase, Action<List<ModProfile>>)` (page size 20), `Download(long id, string targetZipOrFolder, Action<float> progress, Action<bool,string> done)` via `DownloadModToStreamOperation` (file stream into the cache's partial folder, then extract with `ReleasePackage`-style safe extraction into a staging folder — reuse/generalise the zip-slip-safe extractor). `PlatformAvailability(ModProfile)` → windows/android/oculus booleans from `platforms[].modfileLive`. Verify API names/signatures against the decompiled SDK before writing; adapt.
+Autopilot steps: `modioGetMod {id, expectName}`, `modioSearch {phrase, expectId}`, `modioDownload {id}` (into the cache; assert files exist). E2E scenario `modio-probe` (no bot): uses ids/names of small public B&S mods (read the ids from the user's installed mods' `id.modio` files, e.g. InstantSloMo / _TrueZeroEffort / Fascia, read-only) — get, search by name, download.
+
+### 2. mod.io as a delivery source
+- `ModTransferClient`/`ModSwapClient`: steps with `source == "modio"` download from mod.io instead of the host. Same platform: after download compute the folder hash; if it equals the host's hash → commit; otherwise fall back to the host transfer (mod.io serves only its latest file). Cross-platform: commit without hash comparison (record `modioId` and file id in `CacheEntry`). Never write `id.modio`.
+- Download order: mod.io items in parallel with host transfers is not needed — sequential is fine.
+- E2E scenario `join-modio`: bot hosts a set containing a real mod.io mod (with its real `modioId` and the host-side hash computed from a fixture copy of the user's installed copy) that the game lacks → game downloads from mod.io → hash matches (same version) → swap → relaunch → rejoin → present → restore. Variant where the hash differs (bot advertises a different hash) → falls back to the host transfer.
+
+### 3. Nexus → mod.io matcher (host)
+- Pure `ModSync/ModMatcher.cs`: `Score(ModEntry hostMod, ModioCandidate c)` → `Auto` (normalised name equal and author equal to `creator.username`, case-insensitive), `Confirm` (normalised names equal or one contains the other, ≥ 4 chars, different/unknown author), `None`; candidate must have a live Android/Oculus file. Unit tests incl. "JujutsuSorcerers" vs "Jujutsu Sorcerers (Nomad)".
+- Host settings: `hostingSettings.modMatches` (`Dictionary<string, ModMatch{long modioId; bool confirmed}>`, `modioId = 0` = "no Quest version").
+- Host flow: when hosting starts, for enabled host mods without `modioId` and without a stored match, search mod.io (rate-limited, sequential) and store `Auto` matches; collect `Confirm` candidates for the UI.
+- `HostModSet`: each `ModEntry` gets `questModioId` (from `modioId` if the mod is on mod.io with an Android file, else the stored confirmed match). Append-only field (old clients ignore it).
+- Planner (cross-platform): a host mod without `modioId` but with `questModioId > 0` → `Add` with source "modio" using that id; else `Unavailable` as now. Unit tests.
+- UI (host, AMP page): "Quest matches" list with Yes/No buttons for `Confirm` candidates (simple: one candidate shown at a time with mod name, candidate name/author). Keep it minimal.
+- E2E `host-matcher` (no bot or bot joins as "android"): autopilot step `expectMatch {folder, modioId|none}` after hosting with fixture mods whose manifest names match real mod.io mods (use a fixture copy of a real mod with its `id.modio` removed so the matcher must find it by name+author).
+
+### 4. Quest apply path + simulation on PC
+- Platform-specific apply: on Android, `ModSwapClient` applies the journal **in-game** with `JournalApplier.Apply` (no file locks on Android), then shows "Restart Blade & Sorcery to finish" and calls `Application.Quit()`; restore on quit also runs in-game (`Application.quitting`); rejoin on next start as on PC. ProfileSwitch on Android: skip (log "multiplayer profile not supported on Quest yet") and keep the Temporary/Keep warning text about characters.
+- Test switch for PC: `-amp-simulate-platform android` (honoured only when `AMP_TEST_ISOLATED` is set) makes `ModSyncPaths.Platform` report "android" so planning/delivery/UI take the Quest paths; the in-game apply on PC works only for mods without locked files, so the E2E fixtures for this scenario must be JSON-only mods (no .bundle/.dll).
+- E2E `join-quest-sim`: bot hosts (windows) with one Nexus-style mod mapped via `questModioId` to a real mod.io mod that has an Android build (pick one by searching; fixtures choose a small one) and one unmapped mod → game (simulating android) plans: Add from mod.io + Unavailable warning → downloads → applies in-game → quits → runner relaunches the game through Steam with the same test args (the in-game path doesn't use the helper; the runner does the restart, standing in for the player) → rejoin → expect the mod present and the unavailable one listed in the warning.
+
+### 5. Install guide for Quest players + release v1.1.0
+- `docs/HOW-TO-PLAY.txt`: Quest section (USB install path for the Nomad build: `Android/data/<package>/files/Mods` — find the real package name from the game's data (e.g. `Application.identifier` strings in the decompiled code or the Oculus store id) and say "unverified" if not found; note mod.io listing as the no-PC option), and that Quest support is experimental until confirmed on a headset.
+- Opus review of phase 4, fixes, full `-All` E2E (all old + new scenarios) green, `COMMUNITY_VERSION = "1.1.0"`, `tools/make-release.sh 1.1.0 --publish`, verify.
