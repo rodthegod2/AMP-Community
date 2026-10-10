@@ -43,14 +43,12 @@ namespace AMP.Network.Packets.Implementation {
         }
 
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
-            if(ModManager.serverInstance.creatures.ContainsKey(creatureId)) {
-                CreatureNetworkData cnd = ModManager.serverInstance.creatures[creatureId];
+            // Removed first: a joiner greeted in between must not get the creature sent, and two despawns can't both be broadcast
+            if(ModManager.serverInstance.creatures.TryRemove(creatureId, out CreatureNetworkData cnd)) {
+                ModManager.serverInstance.creature_owner.TryRemove(creatureId, out _);
 
                 Log.Debug(Defines.SERVER, $"{client.ClientName} has despawned creature {cnd.creatureType} ({cnd.networkedId})");
                 server.SendToPlayingExcept(this, client.ClientId);
-
-                ModManager.serverInstance.creatures.TryRemove(creatureId, out _);
-                ModManager.serverInstance.creature_owner.TryRemove(creatureId, out _);
 
                 ServerEvents.InvokeOnCreatureDespawned(cnd, client);
             }

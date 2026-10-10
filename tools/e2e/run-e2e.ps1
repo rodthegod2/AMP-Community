@@ -21,6 +21,7 @@ $BotExe    = Join-Path $PSScriptRoot 'AmpBot\bin\Release\net472\AmpBot.exe'
 $SavesSrc  = 'C:\Projects\bns-mp\gametest\saves-backup\BladeAndSorcery\Saves\Default'
 $Base      = @('InstantSloMo', '_TrueZeroEffort', 'Fascia')
 $Dummy     = 'AmpE2EDummy'
+$OldBuild  = 'C:\Projects\bns-mp\build-0.9.9'              # this code built as community version 0.9.9, for the self-update scenario
 $PvP       = @{ mod = 'MultiplayerMod'; option = 'PvP' }
 
 # GameMods/BotMods: fixture folders next to MultiplayerMod (the AMP build under test, always present on both sides)
@@ -68,6 +69,13 @@ $Scenarios = [ordered]@{
                      @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'wait'; seconds = 10 }, @{ step = 'quit' })
         Expect   = @{ reports = @('ready'); greetings = 1; play = $true; playItem = 'SwordShortCommon'; seePlayers = 1; seePlayerMoves = 3; seeItems = @('DaggerCommon'); seeItemMoves = 3; lingerSec = 15 }
     }
+    'self-update' = @{
+        # A 0.9.9 build finds the published release on GitHub, downloads it (redirects to the asset host), swaps itself and relaunches
+        GameMods = $Base; BotMode = 'none'; AmpBuild = $OldBuild; ExpectAmpAfter = '1.0.0'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'expectAmpVersion'; version = '0.9.9' }, @{ step = 'updateAmp'; timeout = 300 },
+                     @{ step = 'expectAmpVersion'; version = '1.0.0' }, @{ step = 'quit' })
+        Expect   = @{}
+    }
     'join-download-temporary' = @{
         GameMods = $Base; BotMods = $Base + $Dummy; BotMode = 'host'; WaitRestore = $true
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
@@ -103,11 +111,27 @@ function Build-All {
     if ($LASTEXITCODE -ne 0) { throw 'AmpBot selftest failed' }
 }
 
-function Copy-ModSet([string]$Target, [string[]]$Names) {
+# The same code as the build under test, but saying it is community version 0.9.9 (a temporary worktree, nothing committed)
+function Build-OldAmp {
+    Note "building the 0.9.9 test AMP into $OldBuild"
+    $wt = 'C:\Projects\bns-mp\wt-amp-099'   # under bns-mp so the local Directory.Build.props applies
+    if (Test-Path -LiteralPath $wt) { & git -C $Repo worktree remove --force $wt }
+    & git -C $Repo worktree add --detach $wt HEAD 2>&1 | Out-Null
+    try {
+        $defines = Join-Path $wt 'Data\Defines.cs'
+        (Get-Content -Raw -LiteralPath $defines) -replace 'COMMUNITY_VERSION = "[^"]+"', 'COMMUNITY_VERSION = "0.9.9"' | Set-Content -NoNewline -LiteralPath $defines
+        if (-not (Select-String -Quiet -LiteralPath $defines -Pattern 'COMMUNITY_VERSION = "0.9.9"')) { throw 'patching the version failed' }
+        & dotnet msbuild (Join-Path $wt 'Adammantium Multiplayer Mod.csproj') -nologo -v:minimal -p:Configuration=Release "-p:GameDirectory=$Game" `
+            '-p:NetamiteDirectory=C:/Projects/bns-mp/ampdeps' "-p:OutputPath=$OldBuild\" '-p:PostBuildEvent=' -nodeReuse:false -p:UseSharedCompilation=false 2>&1 | Select-Object -Last 1 | ForEach-Object { Note "  $_" }
+        if ($LASTEXITCODE -ne 0) { throw '0.9.9 build failed' }
+    } finally { & git -C $Repo worktree remove --force $wt }
+}
+
+function Copy-ModSet([string]$Target, [string[]]$Names, [string]$From = $BuildDir) {
     New-Item -ItemType Directory -Force -Path $Target | Out-Null
     $amp = Join-Path $Target 'MultiplayerMod'
     New-Item -ItemType Directory -Force -Path $amp | Out-Null
-    Copy-Item -Path "$BuildDir\AMP.dll", "$BuildDir\AMP.pdb", "$BuildDir\Netamite*.dll", "$BuildDir\Newtonsoft.Json.dll" -Destination $amp
+    Copy-Item -Path "$From\AMP.dll", "$From\AMP.pdb", "$From\Netamite*.dll", "$From\Newtonsoft.Json.dll" -Destination $amp
     Copy-Item -LiteralPath (Join-Path $Repo 'BS Files\manifest.json') -Destination $amp
     foreach ($n in $Names) { Copy-Item -LiteralPath (Join-Path $Fixtures $n) -Destination (Join-Path $Target $n) -Recurse }
 }
@@ -152,7 +176,7 @@ function Invoke-Scenario([string]$Name) {
     $x = @{ timeoutSec = 60 * $TimeoutMin - 60 } + $s.Expect
     ConvertTo-Json -InputObject $x -Depth 5 | Set-Content -LiteralPath $expect -Encoding ascii
     $botMods = Join-Path $run 'bot-mods'
-    Copy-ModSet $botMods $s.BotMods
+    if ($s.BotMode -ne 'none') { Copy-ModSet $botMods $s.BotMods }
     Note "run folder $run"
 
     $games = New-Object System.Collections.Generic.List[object]   # @{ proc; log; redirected } in start order
@@ -160,14 +184,16 @@ function Invoke-Scenario([string]$Name) {
     $safetyProblem = $null
     & 'C:\Projects\bns-mp\gametest\mods-aside.ps1' | ForEach-Object { Note $_ }
     try {
-        Copy-ModSet $ModsDir $s.GameMods
+        Copy-ModSet $ModsDir $s.GameMods $(if ($s.AmpBuild) { $s.AmpBuild } else { $BuildDir })
         $staged = @(Get-ModsShape $ModsDir)
 
         $botArgs = if ($s.BotMode -eq 'host') { "--host $Port" } else { "--join 127.0.0.1 $Port" }
+        if ($s.BotMode -ne 'none') {
         $bot = Start-Process -FilePath $BotExe -ArgumentList "$botArgs --mods $botMods --cache $(Join-Path $run 'bot-cache') --expect $expect" `
                              -RedirectStandardOutput (Join-Path $run 'bot.log') -RedirectStandardError (Join-Path $run 'bot.err') -PassThru -WindowStyle Hidden
         $null = $bot.Handle   # keeps ExitCode readable after the process ends
         Note "bot pid $($bot.Id) ($($s.BotMode))"
+        }
 
         $gameArgs = '--doorstop-enabled', 'true', '--doorstop-target-assembly', 'AmpTestBoot\AmpTestBoot.dll', '-amp-test-docs', $docs,
                     '-vrmode', 'mockhmd', '-skipintro', '-skipmodswarning', '-screen-fullscreen', '0', '-screen-width', '640', '-screen-height', '360',
@@ -225,7 +251,7 @@ function Invoke-Scenario([string]$Name) {
                 if (-not $exitedAt) { $exitedAt = Get-Date; Note "game pid $($g.proc.Id) exited ($($g.proc.ExitCode)), waiting for a relaunch" }
                 elseif (((Get-Date) - $exitedAt).TotalSeconds -gt 180) { $result.reason = "game exited (code $($g.proc.ExitCode)) without AMPTEST DONE/FAIL and wasn't relaunched"; break }
             }
-            if ($bot.HasExited -and $bot.ExitCode -ne 0) { $result.reason = 'bot failed before the game finished'; break }
+            if ($bot -and $bot.HasExited -and $bot.ExitCode -ne 0) { $result.reason = 'bot failed before the game finished'; break }
         }
         if (-not $end -and -not $result.reason -and -not $safetyProblem) { $result.reason = "timed out after $TimeoutMin min" }
 
@@ -233,10 +259,26 @@ function Invoke-Scenario([string]$Name) {
         foreach ($g in $games) {
             if (-not $g.proc.WaitForExit($(if ($end) { 60000 } else { 0 }))) { Stop-Process -Id $g.proc.Id -Force; $g.proc.WaitForExit(30000) | Out-Null; $events.Add("stopped own game pid $($g.proc.Id)") }
         }
-        if (-not $bot.WaitForExit(90000)) { Stop-Process -Id $bot.Id -Force; $events.Add("killed bot pid $($bot.Id)") }
-        $botOut = Get-Content -LiteralPath (Join-Path $run 'bot.log') -ErrorAction SilentlyContinue
-        $botEnd = $botOut | Where-Object { $_ -match '^BOT (DONE|FAIL)' } | Select-Object -Last 1
-        Note "bot: $botEnd"
+        $botEnd = 'BOT DONE (no bot in this scenario)'
+        if ($bot) {
+            if (-not $bot.WaitForExit(90000)) { Stop-Process -Id $bot.Id -Force; $events.Add("killed bot pid $($bot.Id)") }
+            $botOut = Get-Content -LiteralPath (Join-Path $run 'bot.log') -ErrorAction SilentlyContinue
+            $botEnd = $botOut | Where-Object { $_ -match '^BOT (DONE|FAIL)' } | Select-Object -Last 1
+            Note "bot: $botEnd"
+        }
+
+        if ($s.ExpectAmpAfter) {
+            # Keep swap: the new AMP stays in Mods, the replaced build is kept in AMP_ModCache\old\<journal id>
+            Wait-Helpers 60 | Out-Null
+            $manifest = Join-Path $ModsDir 'MultiplayerMod\manifest.json'
+            $version = if (Test-Path -LiteralPath $manifest) { (Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json).ModVersion } else { 'missing' }
+            $old = @(Get-ChildItem -Path (Join-Path $CacheDir 'old\*\MultiplayerMod\AMP.dll') -ErrorAction SilentlyContinue)
+            $oldSame = $old.Count -gt 0 -and (Get-FileHash $old[0].FullName).Hash -eq (Get-FileHash (Join-Path $s.AmpBuild 'AMP.dll')).Hash
+            $hl = Read-Shared (Join-Path $CacheDir 'helper\helper.log')
+            if ($hl) { Set-Content -LiteralPath (Join-Path $run 'helper.log') -Value $hl }
+            $events.Add("update: Mods\MultiplayerMod is $version, old build kept in the cache=$oldSame ($($old.Count) found)")
+            if (-not ($version -eq $s.ExpectAmpAfter -and $oldSame) -and -not $result.reason) { $result.reason = "after the update Mods has AMP $version, old build kept=$oldSame" }
+        }
 
         if ($s.WaitRestore) {
             # Temporary swap: the restore helper starts when the game quits and puts the staged set back
@@ -267,7 +309,7 @@ function Invoke-Scenario([string]$Name) {
         }
 
         $gameOk = $end -like 'AMPTEST DONE*'
-        $botOk = $bot.ExitCode -eq 0 -and $botEnd -like 'BOT DONE*'
+        $botOk = (-not $bot -or $bot.ExitCode -eq 0) -and $botEnd -like 'BOT DONE*'
         if (-not $gameOk -and -not $result.reason) { $result.reason = "game: $end" }
         if (-not $botOk -and -not $result.reason) { $result.reason = "bot: $botEnd" }
         if ($gameOk -and $botOk -and -not $result.reason) { $result.status = 'PASS' }
@@ -298,7 +340,7 @@ function Invoke-Scenario([string]$Name) {
 }
 
 if (-not $All -and -not $Scenario) { throw "use -Scenario <$($Scenarios.Keys -join '|')> or -All" }
-if (-not $NoBuild) { Build-All }
+if (-not $NoBuild) { Build-All; if ($All -or $Scenario -eq 'self-update') { Build-OldAmp } }
 $names = if ($All) { @($Scenarios.Keys) } else { @($Scenario) }
 $results = foreach ($n in $names) { Invoke-Scenario $n }
 $results | Format-Table scenario, status, seconds, reason -AutoSize | Out-String -Width 250 | Write-Host

@@ -140,6 +140,8 @@ namespace AMP.ModSync {
                 case "expectRemotePlayerMoved": return ExpectRemotePlayerMoved(step);
                 case "spawnItem":           return SpawnItem(step);
                 case "expectItemSynced":    return ExpectItemSynced(step);
+                case "updateAmp":           return UpdateAmp(n, state, statePath);
+                case "expectAmpVersion":    return ExpectAmpVersion(step);
                 case "expectModSync":       return ExpectModSync(step);
                 case "downloadAndRestart":  return DownloadAndRestart(n, step, state, statePath);
                 case "expectRejoined":      return ExpectRejoined(state);
@@ -259,6 +261,39 @@ namespace AMP.ModSync {
                 if(ind != null) { Debug.Log(Prefix + "INFO item " + ind.dataId + " (" + ind.networkedId + ") is in the game at " + ind.clientsideItem.transform.position); yield break; }
                 yield return Poll;
             }
+        }
+
+        // The startup check (ReleaseUpdater.CheckRoutine, 10 s after start) finds the release; then the same journal + helper swap as a
+        // mod download replaces AMP and relaunches the game. Like downloadAndRestart, progress is saved before the game quits.
+        private static IEnumerator UpdateAmp(int n, AutopilotState state, string statePath) {
+            float giveUp = Time.realtimeSinceStartup + 60f;
+            while(ReleaseUpdater.Available == null) {
+                if(Time.realtimeSinceStartup > giveUp) { failure = "no newer AMP release was found (this is " + Defines.COMMUNITY_VERSION + "; " + (ReleaseUpdater.CannotUpdateReason() ?? "check the log for the update check") + ")"; yield break; }
+                yield return Poll;
+            }
+            string reason = ReleaseUpdater.CannotUpdateReason();
+            if(reason != null) { failure = "can't update: " + reason; yield break; }
+            string unsafeRelaunch = AutopilotScript.IsolationProblem(RelaunchArguments());
+            if(unsafeRelaunch != null) { failure = "refusing to restart, the relaunch wouldn't be isolated: " + unsafeRelaunch; yield break; }
+            Debug.Log(Prefix + "INFO updating " + Defines.COMMUNITY_VERSION + " -> " + ReleaseUpdater.Available.version);
+
+            state.values["restartedFrom"] = n.ToString();
+            state.step = n + 1;
+            state.Save(statePath);
+            restartStep = n;
+            ReleaseUpdater.UpdateNow();
+            while(true) {
+                if(!ReleaseUpdater.Busy) { restartStep = -1; failure = "the update stopped: " + ReleaseUpdater.Status; yield break; }
+                yield return Poll;
+            }
+        }
+
+        private static IEnumerator ExpectAmpVersion(AutopilotStep step) {
+            string folder = ModSwapClient.FindAmpFolder();
+            string manifest = folder == null ? null : ModInventory.ReadEntry(folder, new string[0])?.version;
+            Debug.Log(Prefix + "INFO running AMP " + Defines.COMMUNITY_VERSION + " from " + folder + " (manifest version " + manifest + ")");
+            if(Defines.COMMUNITY_VERSION != step.Str("version")) failure = "AMP is " + Defines.COMMUNITY_VERSION + ", expected " + step.Str("version");
+            yield break;
         }
 
         private static IEnumerator ExpectModSync(AutopilotStep step) {

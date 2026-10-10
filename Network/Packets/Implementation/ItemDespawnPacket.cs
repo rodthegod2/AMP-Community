@@ -43,15 +43,13 @@ namespace AMP.Network.Packets.Implementation {
         }
 
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
-            if(ModManager.serverInstance.items.ContainsKey(itemId)) {
-                ItemNetworkData ind = ModManager.serverInstance.items[itemId];
+            // Removed first: a joiner greeted in between must not get the item sent, and two despawns can't both be broadcast
+            if(ModManager.serverInstance.items.TryRemove(itemId, out ItemNetworkData ind)) {
+                ModManager.serverInstance.item_owner.TryRemove(itemId, out _);
 
                 Log.Debug(Defines.SERVER, $"{client.ClientName} has despawned item {ind.dataId} ({ind.networkedId})");
 
                 server.SendToPlayingExcept(this, client.ClientId);
-
-                ModManager.serverInstance.items.TryRemove(itemId, out _);
-                ModManager.serverInstance.item_owner.TryRemove(itemId, out _);
 
                 ServerEvents.InvokeOnItemDespawned(ind, client);
             }

@@ -1010,6 +1010,9 @@ internal static class Program {
                                                    && gameplay.Steps[2].Str("dataId") == "DaggerCommon" && gameplay.Steps[3].Str("dataId") == "SwordShortCommon");
         T("spawnItem needs an item id", Rejected(@"[{""step"":""spawnItem""}]", "dataId") && Rejected(@"[{""step"":""spawnItem"",""dataId"":"" ""}]", "dataId"));
         T("expectRemotePlayerMoved needs a positive distance", Rejected(@"[{""step"":""expectRemotePlayerMoved"",""minDistance"":0}]", "minDistance"));
+        var update = Parse(@"[{""step"":""updateAmp"",""timeout"":300},{""step"":""expectAmpVersion"",""version"":""1.0.0""}]", out error);
+        T("update steps parse (" + error + ")", update != null && update.Steps[0].TimeoutSec == 300 && update.Steps[1].Str("version") == "1.0.0");
+        T("expectAmpVersion needs a version", Rejected(@"[{""step"":""expectAmpVersion""}]", "version"));
         var players = Parse(@"[{""step"":""waitPlayers"",""count"":2}]", out error);
         T("waitPlayers parses (" + error + ")", players != null && players.Steps[0].Int("count") == 2);
         T("waitPlayers needs a count of at least 1", Rejected(@"[{""step"":""waitPlayers"",""count"":0}]", "count") && Rejected(@"[{""step"":""waitPlayers""}]", "count"));

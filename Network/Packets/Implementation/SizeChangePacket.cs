@@ -82,7 +82,7 @@ namespace AMP.Network.Packets.Implementation {
         }
 
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
-            server.SendReliableToAllExcept(this, client.ClientId);
+            server.SendToPlayingExcept(this, client.ClientId);
 
             return true;
         }

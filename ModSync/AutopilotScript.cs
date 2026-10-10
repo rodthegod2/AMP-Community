@@ -40,6 +40,8 @@ namespace AMP.ModSync {
             { "expectRemotePlayerMoved", "minDistance:int[1-100]" }, // a remote avatar moved this many meters from where it was first seen
             { "spawnItem",           "dataId:string" },   // spawns a catalog item in front of the player and waits until the server gave it an id
             { "expectItemSynced",    "dataId:string" },   // an item of another player with this id exists in our game
+            { "updateAmp",           "" },                // installs the newer AMP release the startup check found (the game restarts)
+            { "expectAmpVersion",    "version:string" },  // the running AMP's community version
             { "expectModSync",       "blocks:bool" },
             { "downloadAndRestart",  "mode:mode" },
             { "expectRejoined",      "" },

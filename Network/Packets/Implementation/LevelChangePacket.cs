@@ -131,6 +131,7 @@ namespace AMP.Network.Packets.Implementation {
                         foreach(ClientData c in ModManager.serverInstance.Clients) {
                             c.LoadedLevel = false; // every player has to load the new level
                             if(c.ClientId == client.ClientId) continue;
+                            if(!ModSync.ModSyncHost.IsPlaying(c)) continue; // a joiner in mod sync isn't in any level yet
                             c.ShowText("level_change", $"{client.ClientName} is loading <color=#0099FF>{level}</color>.\n<color=#FF0000>Please stay in your level.</color>", Color.yellow, 240);
                         }
                         
