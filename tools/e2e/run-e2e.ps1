@@ -114,9 +114,11 @@ function Build-All {
 # The same code as the build under test, but saying it is community version 0.9.9 (a temporary worktree, nothing committed)
 function Build-OldAmp {
     Note "building the 0.9.9 test AMP into $OldBuild"
+    $ErrorActionPreference = 'Continue'   # git reports progress on stderr; exit codes are checked instead
     $wt = 'C:\Projects\bns-mp\wt-amp-099'   # under bns-mp so the local Directory.Build.props applies
     if (Test-Path -LiteralPath $wt) { & git -C $Repo worktree remove --force $wt }
     & git -C $Repo worktree add --detach $wt HEAD 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'git worktree add failed' }
     try {
         $defines = Join-Path $wt 'Data\Defines.cs'
         (Get-Content -Raw -LiteralPath $defines) -replace 'COMMUNITY_VERSION = "[^"]+"', 'COMMUNITY_VERSION = "0.9.9"' | Set-Content -NoNewline -LiteralPath $defines
