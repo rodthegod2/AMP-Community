@@ -5,3 +5,4 @@ bin
 .vscode/
 mono_crash*
 dist/
+tools/e2e/fixtures/
