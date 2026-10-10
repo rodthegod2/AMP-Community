@@ -36,6 +36,15 @@ namespace AmpBot {
             Check<ModFilePacket>(folder, "ModFilePacket.cs", ids);
             Check<ServerInfoPacket>(folder, "ServerInfoPacket.cs", ids);
             Check<LevelChangePacket>(folder, "LevelChangePacket.cs", ids);
+            Check<PlayerDataPacket>(folder, "PlayerDataPacket.cs", ids);
+            Check<PlayerPositionPacket>(folder, "PlayerPositionPacket.cs", ids);
+            Check<PlayerEquipmentPacket>(folder, "PlayerEquipmentPacket.cs", ids);
+            Check<PlayerRagdollPacket>(folder, "PlayerRagdollPacket.cs", ids);
+            Check<ItemSpawnPacket>(folder, "ItemSpawnPacket.cs", ids);
+            Check<ItemPositionPacket>(folder, "ItemPositionPacket.cs", ids);
+            Check<ItemOwnerPacket>(folder, "ItemOwnerPacket.cs", ids);
+            Check<ModListPacket>(folder, "ModListPacket.cs", ids);
+            Check<AllowTransmissionPacket>(folder, "AllowTransmissionPacket.cs", ids);
         }
 
         // AMP's PacketType enum: NAME = value, or NAME, (previous + 1)
@@ -52,23 +61,26 @@ namespace AmpBot {
 
         private static readonly Dictionary<string, Type> Keywords = new Dictionary<string, Type> {
             { "byte", typeof(byte) }, { "int", typeof(int) }, { "long", typeof(long) }, { "bool", typeof(bool) },
-            { "string", typeof(string) }, { "string[]", typeof(string[]) }, { "EventTime", typeof(EventTime) },
+            { "string", typeof(string) }, { "string[]", typeof(string[]) }, { "float", typeof(float) }, { "EventTime", typeof(EventTime) },
         };
 
         private static void Check<TPacket>(string folder, string file, Dictionary<string, int> ids) where TPacket : NetPacket {
             string source = File.ReadAllText(Path.Combine(folder, "Implementation", file));
-            Match def = Regex.Match(source, @"\[PacketDefinition\(\(byte\)\s*PacketType\.(\w+)\)\]");
+            // [PacketDefinition((byte) PacketType.X)] or [PacketDefinition(false, (byte)PacketType.X)]; reliable unless it says false
+            Match def = Regex.Match(source, @"\[PacketDefinition\((?:(true|false),\s*)?\(byte\)\s*PacketType\.(\w+)\)\]");
+            PacketDefinition bot = typeof(TPacket).GetCustomAttribute<PacketDefinition>(true);
             int ampId;
-            Is(file + " id", def.Success && ids.TryGetValue(def.Groups[1].Value, out ampId) && ampId == typeof(TPacket).GetCustomAttribute<PacketDefinition>(true).packetType,
-              "AMP " + (def.Success ? def.Groups[1].Value : "?") + ", bot " + typeof(TPacket).GetCustomAttribute<PacketDefinition>(true).packetType);
+            bool ampReliable = !def.Success || def.Groups[1].Value != "false";
+            Is(file + " id", def.Success && ids.TryGetValue(def.Groups[2].Value, out ampId) && ampId == bot.packetType && ampReliable == bot.reliable,
+               "AMP " + (def.Success ? def.Groups[2].Value : "?") + (ampReliable ? "" : " unreliable") + ", bot " + bot.packetType + (bot.reliable ? "" : " unreliable"));
 
             List<string> amp = Regex.Matches(source, @"\[SyncedVar(\(\w*\))?\]\s*public\s+([\w\[\]]+)\s+(\w+)").Cast<Match>()
                                     .Select(m => (Keywords.ContainsKey(m.Groups[2].Value) ? Keywords[m.Groups[2].Value].Name : m.Groups[2].Value) + " " + m.Groups[3].Value
                                                  + (m.Groups[1].Value == "(true)" ? " low" : "")).ToList();
             // Netamite's own order: GetMembers() filtered by [SyncedVar]
-            List<string> bot = typeof(TPacket).GetMembers().Select(member => new { member, att = member.GetCustomAttribute<SyncedVar>(true) })
+            List<string> fields = typeof(TPacket).GetMembers().Select(member => new { member, att = member.GetCustomAttribute<SyncedVar>(true) })
                                         .Where(x => x.att != null).Select(x => ((FieldInfo) x.member).FieldType.Name + " " + x.member.Name + (x.att.LowPrecision ? " low" : "")).ToList();
-            Is(file + " fields", amp.Count > 0 && amp.SequenceEqual(bot), "AMP [" + string.Join(", ", amp) + "] bot [" + string.Join(", ", bot) + "]");
+            Is(file + " fields", amp.Count > 0 && amp.SequenceEqual(fields), "AMP [" + string.Join(", ", amp) + "] bot [" + string.Join(", ", fields) + "]");
         }
 
         #endregion
@@ -85,8 +97,10 @@ namespace AmpBot {
                 File.WriteAllBytes(Path.Combine(hostMods, "Extra", "empty.bin"), new byte[0]);
 
                 var snapshot = new List<OptionValue> { new OptionValue { mod = "MultiplayerMod", option = "PvP", title = "Disabled", index = 0 } };
-                var hostX = new Expectations { reports = { JoinerStatus.NeedsSetup, JoinerStatus.Ready }, served = { "Extra" }, greetings = 1, sendSnapshot = snapshot, lingerSec = 0 };
-                var joinX = new Expectations { planBlocks = true, download = true, downloaded = { "Extra" }, files = { "Extra/empty.bin", "Extra/data.bin" }, snapshot = snapshot, lingerSec = 0 };
+                var hostX = new Expectations { reports = { JoinerStatus.NeedsSetup, JoinerStatus.Ready }, served = { "Extra" }, greetings = 1, sendSnapshot = snapshot, lingerSec = 0,
+                                               play = true, playItem = "DaggerCommon", seePlayers = 1, seePlayerMoves = 5, seeItems = { "SwordShortCommon" }, seeItemMoves = 5 };
+                var joinX = new Expectations { planBlocks = true, download = true, downloaded = { "Extra" }, files = { "Extra/empty.bin", "Extra/data.bin" }, snapshot = snapshot, lingerSec = 0,
+                                               play = true, playItem = "SwordShortCommon", equipment = { }, seePlayers = 1, seePlayerMoves = 5, seeItems = { "DaggerCommon" }, seeItemMoves = 5 };
 
                 const int port = 27919;
                 var hostList = new Checklist();
@@ -101,6 +115,7 @@ namespace AmpBot {
                 bool hosted = hostList.Wait(TimeSpan.FromSeconds(10));
                 Is("loopback host saw everything", hosted, hostList.Failure ?? "");
                 joiner.Done();
+                joiner.StopPlaying();
                 joiner.Disconnect();
                 hoster.Stop();
                 Thread.Sleep(500);

@@ -18,6 +18,18 @@ namespace AmpBot {
         public List<OptionValue> snapshot = new List<OptionValue>();       // must be in SETTINGS_SNAPSHOT (an empty title matches any)
         public List<OptionValue> settingChanged = new List<OptionValue>(); // must arrive as SETTING_CHANGED
 
+        public List<OptionValue> noSettingChanged = new List<OptionValue>(); // must NOT arrive as SETTING_CHANGED
+
+        // Gameplay, both modes
+        public bool quietBeforeGreeting;   // join: no gameplay traffic (players, items) may arrive while the bot is still in mod sync
+        public bool play;                  // act as a player once transmission is allowed: avatar, walking, one item
+        public string playItem = "SwordShortCommon";  // the item the bot spawns and moves ("" = none)
+        public List<string> equipment = new List<string> { "ApparelCivilianChest", "ApparelCivilianBoots" }; // wardrobe ids in PlayerEquipment
+        public int seePlayers;             // other players' PlayerData that must arrive
+        public int seePlayerMoves;         // position updates of another player that must arrive
+        public List<string> seeItems = new List<string>(); // item ids another player must spawn
+        public int seeItemMoves;           // position updates that must arrive for each of those items
+
         // --host
         public string modSyncMode = ModSyncMode.Warn;
         public List<OptionValue> sendSnapshot = new List<OptionValue>();   // sent to every greeted joiner
@@ -27,7 +39,7 @@ namespace AmpBot {
 
         public static Expectations Load(string path) {
             if(path == null) return new Expectations();
-            var settings = new JsonSerializerSettings { MissingMemberHandling = MissingMemberHandling.Error };
+            var settings = new JsonSerializerSettings { MissingMemberHandling = MissingMemberHandling.Error, ObjectCreationHandling = ObjectCreationHandling.Replace };
             return JsonConvert.DeserializeObject<Expectations>(File.ReadAllText(path), settings) ?? new Expectations();
         }
     }

@@ -30,6 +30,12 @@ namespace AmpBot {
         private string hostModSetJson;
         private int nextTransferId;
         private int greetings;
+        private int nextItemId = 100;
+        private readonly ConcurrentDictionary<int, bool> playing = new ConcurrentDictionary<int, bool>(); // fully greeted clients
+        private readonly GameplayWatch watch;
+        private readonly BotPlayer player;
+        private ItemSpawnPacket botItem;          // the bot avatar's item once spawned, for joiners greeted later
+        private const int BotPlayerId = 900;      // the host's own avatar; real client ids start at 1
 
         private class Upload {
             public volatile bool cancelled;
@@ -58,6 +64,16 @@ namespace AmpBot {
                 loadOrder = ModInventory.ReadLoadOrder(modsFolder),
                 ampBuild  = amp != null ? amp.hash : "",
             });
+            watch = new GameplayWatch(x, list);
+            watch.IgnorePlayer(BotPlayerId);
+            player = new BotPlayer(x, 10, () => Netamite.Helper.TimeHelper.Millis, SendToPlaying, p => SendToPlaying(p, false));
+            player.SpawnItemNow += () => {
+                int id = Interlocked.Increment(ref nextItemId);
+                botItem = player.ItemSpawn(id, 0);
+                player.ItemHasId(id);
+                Out.Info("spawning " + x.playItem + " as item " + id);
+                SendToPlaying(botItem);
+            };
             Out.Info("hosting " + hostMods.Count + " mods: " + string.Join(", ", hostMods.Select(m => m.folder)));
         }
 
@@ -67,6 +83,8 @@ namespace AmpBot {
             server.OnDataReceived += OnPacket;
             server.OnDisconnect += (c, reason) => {
                 Out.Info("client " + c.ClientId + " left: " + reason);
+                bool ignored;
+                playing.TryRemove(c.ClientId, out ignored);
                 Upload upload;
                 if(uploads.TryRemove(c.ClientId, out upload)) Cancel(upload);
             };
@@ -75,7 +93,17 @@ namespace AmpBot {
         }
 
         public void Stop() {
+            player.Stop();
             try { server?.Stop(); } catch(Exception) { }
+        }
+
+        private void SendToPlaying(NetPacket p) { SendToPlaying(p, true); }
+
+        private void SendToPlaying(NetPacket p, bool reliable) {
+            foreach(ClientInformation c in server.Clients) {
+                if(!playing.ContainsKey(c.ClientId)) continue;
+                if(reliable) server.SendReliableTo(c, p); else server.SendUnreliableTo(c, p);
+            }
         }
 
         private void OnConnect(ClientInformation c) {
@@ -87,7 +115,7 @@ namespace AmpBot {
             try {
                 ModSyncPacket packet = p as ModSyncPacket;
                 if(packet == null) {
-                    if(p is LevelChangePacket) Out.Info("client " + c.ClientId + " sent a level change: " + ((LevelChangePacket) p).level);
+                    OnGameplay(c, p);
                     return;
                 }
                 Upload upload;
@@ -134,14 +162,57 @@ namespace AmpBot {
             if(report.status == JoinerStatus.Ready) Greet(c);
         }
 
-        // The part of Server.GreetPlayer a joiner needs to count as joined: ServerInfo first, then the settings snapshot
+        // Server.GreetPlayer, first half: ServerInfo and the level; the joiner answers with the same level once it is loaded
         private void Greet(ClientInformation c) {
             server.SendTo(c, new ServerInfoPacket(AmpVersion, server.MaxClients));
+            server.SendTo(c, new LevelChangePacket("Home", "Sandbox", new string[0], EventTime.OnEnd)); // no options: any Home counts as the same level
+        }
+
+        // Server.GreetPlayer, second half: the other players, the items, transmission allowed, time sync, settings snapshot
+        private void FinishGreeting(ClientInformation c) {
+            if(!playing.TryAdd(c.ClientId, true)) return;
+            if(player.PlayerId > 0) {
+                server.SendTo(c, new PlayerDataPacket { clientId = BotPlayerId, name = "AmpBot", creatureId = BotPlayer.CreatureId, height = 1.8f, playerPos = player.Center, playerRotY = 0, uniqueId = "" });
+            }
+            if(botItem != null) server.SendTo(c, botItem);
+            server.SendTo(c, new AllowTransmissionPacket { allow = true });
+            server.InitializeTimeSync(c);
             if(x.sendSnapshot.Count > 0) {
                 string json = JsonConvert.SerializeObject(new SettingsMessage { values = x.sendSnapshot });
                 foreach(ModSyncPacket packet in ModSyncPacket.Create(ModSyncPacket.SETTINGS_SNAPSHOT, json)) server.SendTo(c, packet);
             }
             list.Mark("greeting " + Interlocked.Increment(ref greetings), "client " + c.ClientId);
+        }
+
+        // What Server and the packets' ProcessServer do with a playing client's gameplay packets, as far as the bot needs it
+        private void OnGameplay(ClientInformation c, NetPacket p) {
+            if(p is LevelChangePacket) {
+                LevelChangePacket level = (LevelChangePacket) p;
+                Out.Info("client " + c.ClientId + " is in " + level.level + " (" + level.eventTime + ")");
+                if(level.eventTime == EventTime.OnEnd) FinishGreeting(c);
+            } else if(p is PlayerDataPacket) {
+                PlayerDataPacket data = (PlayerDataPacket) p;
+                data.clientId = c.ClientId; // the server decides who a player is
+                watch.OnPlayerData(data);
+                if(x.play) player.Start(BotPlayerId, data.playerPos ?? new Netamite.Datatype.Vector3(0, 0, 0), "AmpBot");
+            } else if(p is PlayerEquipmentPacket) {
+                watch.OnEquipment((PlayerEquipmentPacket) p);
+            } else if(p is PlayerRagdollPacket) {
+                watch.OnPlayerMoved(c.ClientId, ((PlayerRagdollPacket) p).position);
+            } else if(p is PlayerPositionPacket) {
+                watch.OnPlayerMoved(c.ClientId, ((PlayerPositionPacket) p).position);
+            } else if(p is ItemSpawnPacket) {
+                // ItemSpawnPacket.ProcessServer: a new network id, echoed to the spawner with its own clientsideId, and ownership
+                ItemSpawnPacket item = (ItemSpawnPacket) p;
+                int id = Interlocked.Increment(ref nextItemId);
+                var answer = new ItemSpawnPacket { itemId = id, type = item.type, category = item.category, clientsideId = item.clientsideId,
+                                                   position = item.position, rotation = item.rotation, isMagicProjectile = item.isMagicProjectile };
+                server.SendTo(c, answer);
+                server.SendTo(c, new ItemOwnerPacket { itemId = id, owning = true });
+                watch.OnItemSpawn(answer, false);
+            } else if(p is ItemPositionPacket) {
+                watch.OnItemMoved((ItemPositionPacket) p);
+            }
         }
 
         private void OnRequest(ClientInformation c, int requestId, ModsRequest request) {

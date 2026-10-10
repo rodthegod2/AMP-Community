@@ -33,7 +33,7 @@ $Scenarios = [ordered]@{
     'host-transfer' = @{
         GameMods = $Base + $Dummy; BotMods = $Base; BotMode = 'join'
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 5 }, @{ step = 'quit' })
-        Expect   = @{ planBlocks = $true; download = $true; downloaded = @($Dummy); files = @("$Dummy/empty.bin", "$Dummy/data.bin"); greeted = $true }
+        Expect   = @{ planBlocks = $true; download = $true; quietBeforeGreeting = $true; downloaded = @($Dummy); files = @("$Dummy/empty.bin", "$Dummy/data.bin"); greeted = $true }
     }
     'host-settings' = @{
         GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
@@ -41,13 +41,32 @@ $Scenarios = [ordered]@{
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 300 },
                      @{ step = 'setOption'; mod = 'MultiplayerMod'; option = 'PvP'; title = 'Enabled' }, @{ step = 'wait'; seconds = 2 },
                      @{ step = 'setOption'; mod = 'MultiplayerMod'; option = 'PvP'; title = 'Disabled' }, @{ step = 'wait'; seconds = 5 }, @{ step = 'quit' })
-        Expect   = @{ greeted = $true; snapshot = @($PvP); settingChanged = @(@{ mod = 'MultiplayerMod'; option = 'PvP'; title = 'Disabled' }) }
+        # The seeded options start with PvP Enabled, so applying Enabled again must not be broadcast
+        Expect   = @{ greeted = $true; snapshot = @(@{ mod = 'MultiplayerMod'; option = 'PvP'; title = 'Enabled' }); settingChanged = @(@{ mod = 'MultiplayerMod'; option = 'PvP'; title = 'Disabled' })
+                      noSettingChanged = @(@{ mod = 'MultiplayerMod'; option = 'PvP'; title = 'Enabled' }) }
+    }
+    'host-gameplay' = @{
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
+        # The game sees the bot's avatar walk and its sword; the bot sees the host's player, its moves and the dagger the game spawns.
+        # An idle player only sends its position every 5 s, hence the low seePlayerMoves. quietBeforeGreeting: no gameplay traffic during mod sync.
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 300 },
+                     @{ step = 'expectRemotePlayers'; count = 1 }, @{ step = 'expectRemotePlayerMoved'; minDistance = 1 }, @{ step = 'expectItemSynced'; dataId = 'SwordShortCommon' },
+                     @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'wait'; seconds = 10 }, @{ step = 'quit' })
+        Expect   = @{ greeted = $true; quietBeforeGreeting = $true; play = $true; playItem = 'SwordShortCommon'; equipment = @(); seePlayers = 1; seePlayerMoves = 3; seeItems = @('DaggerCommon'); seeItemMoves = 3; lingerSec = 15 }
     }
     'join-identical' = @{
         GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'host'
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $false }, @{ step = 'wait'; seconds = 3 },
                      @{ step = 'expectOption'; mod = 'MultiplayerMod'; option = 'PvP'; title = 'Disabled' }, @{ step = 'quit' })
         Expect   = @{ reports = @('ready'); greetings = 1; sendSnapshot = @(@{ mod = 'MultiplayerMod'; option = 'PvP'; title = 'Disabled'; index = 0 }); lingerSec = 10 }
+    }
+    'join-gameplay' = @{
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'host'
+        # The bot hosts like Server.GreetPlayer (level, players, transmission) and plays: avatar, walking, a sword
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $false },
+                     @{ step = 'expectRemotePlayers'; count = 1 }, @{ step = 'expectRemotePlayerMoved'; minDistance = 1 }, @{ step = 'expectItemSynced'; dataId = 'SwordShortCommon' },
+                     @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'wait'; seconds = 10 }, @{ step = 'quit' })
+        Expect   = @{ reports = @('ready'); greetings = 1; play = $true; playItem = 'SwordShortCommon'; seePlayers = 1; seePlayerMoves = 3; seeItems = @('DaggerCommon'); seeItemMoves = 3; lingerSec = 15 }
     }
     'join-download-temporary' = @{
         GameMods = $Base; BotMods = $Base + $Dummy; BotMode = 'host'; WaitRestore = $true
@@ -210,8 +229,10 @@ function Invoke-Scenario([string]$Name) {
         }
         if (-not $end -and -not $result.reason -and -not $safetyProblem) { $result.reason = "timed out after $TimeoutMin min" }
 
-        # Let the game quit by itself after DONE/FAIL, then the bot
-        foreach ($g in $games) { if (-not $g.proc.WaitForExit(60000)) { Stop-Process -Id $g.proc.Id -Force; $events.Add("killed own game pid $($g.proc.Id)") } }
+        # After DONE/FAIL the game quits by itself; otherwise (timeout, bot failure) it is stopped right away
+        foreach ($g in $games) {
+            if (-not $g.proc.WaitForExit($(if ($end) { 60000 } else { 0 }))) { Stop-Process -Id $g.proc.Id -Force; $g.proc.WaitForExit(30000) | Out-Null; $events.Add("stopped own game pid $($g.proc.Id)") }
+        }
         if (-not $bot.WaitForExit(90000)) { Stop-Process -Id $bot.Id -Force; $events.Add("killed bot pid $($bot.Id)") }
         $botOut = Get-Content -LiteralPath (Join-Path $run 'bot.log') -ErrorAction SilentlyContinue
         $botEnd = $botOut | Where-Object { $_ -match '^BOT (DONE|FAIL)' } | Select-Object -Last 1
@@ -253,7 +274,10 @@ function Invoke-Scenario([string]$Name) {
         $result.timings = (($seen.GetEnumerator() | Where-Object { $_.Key -match '^AMPTEST (OK|DONE|START)' } | Sort-Object Value | ForEach-Object { ($_.Key -replace '^AMPTEST ', '' -replace ' \(.*$', '') + '@' + $_.Value + 's' }) -join ' ')
     }
     finally {
-        foreach ($g in $games) { if (-not $g.proc.HasExited) { Stop-Process -Id $g.proc.Id -Force -ErrorAction SilentlyContinue; $g.proc.WaitForExit(30000) | Out-Null } }
+        foreach ($g in $games) { if (-not $g.proc.HasExited) { Stop-Process -Id $g.proc.Id -Force -ErrorAction SilentlyContinue }; $g.proc.WaitForExit(30000) | Out-Null }
+        # A process only leaves the list a moment after it exited; mods-restore refuses to run while any game process exists
+        $until = (Get-Date).AddSeconds(60)
+        while ((Get-Date) -lt $until -and @(Get-Process BladeAndSorcery -ErrorAction SilentlyContinue).Count -gt 0) { Start-Sleep -Milliseconds 500 }
         if ($bot -and -not $bot.HasExited) { Stop-Process -Id $bot.Id -Force -ErrorAction SilentlyContinue }
         Wait-Helpers 120 | Out-Null
         for ($i = 0; $i -lt $games.Count; $i++) { Set-Content -LiteralPath (Join-Path $run "game-$($i + 1).log") -Value $games[$i].log }

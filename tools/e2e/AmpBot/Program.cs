@@ -64,6 +64,7 @@ namespace AmpBot {
                 if(!joiner.Connect(deadline)) list.Fail(list.Failure ?? "couldn't connect to " + join + ":" + port);
                 ok = list.Wait(deadline - DateTime.UtcNow);
                 if(ok) { joiner.Done(); Thread.Sleep(x.lingerSec * 1000); }
+                joiner.StopPlaying();
                 joiner.Disconnect();
             }
             return Finish(ok, list);

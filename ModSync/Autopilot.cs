@@ -1,5 +1,6 @@
 using AMP.Data;
 using AMP.Logging;
+using AMP.Network.Data.Sync;
 using AMP.Overlay;
 using System;
 using System.Collections;
@@ -135,6 +136,10 @@ namespace AMP.ModSync {
                 case "host":                return Host(step);
                 case "join":                return Join(step);
                 case "waitPlayers":         return WaitPlayers(step);
+                case "expectRemotePlayers": return ExpectRemotePlayers(step);
+                case "expectRemotePlayerMoved": return ExpectRemotePlayerMoved(step);
+                case "spawnItem":           return SpawnItem(step);
+                case "expectItemSynced":    return ExpectItemSynced(step);
                 case "expectModSync":       return ExpectModSync(step);
                 case "downloadAndRestart":  return DownloadAndRestart(n, step, state, statePath);
                 case "expectRejoined":      return ExpectRejoined(state);
@@ -186,6 +191,72 @@ namespace AMP.ModSync {
                 Network.Server.Server server = ModManager.serverInstance;
                 if(server == null) { failure = "not hosting"; yield break; }
                 if(server.Clients.Count(c => c.greeted) >= step.Int("count")) yield break;
+                yield return Poll;
+            }
+        }
+
+        // Remote players (not us) whose avatar has been spawned in our game
+        private static System.Collections.Generic.List<PlayerNetworkData> RemoteAvatars() {
+            var result = new System.Collections.Generic.List<PlayerNetworkData>();
+            ClientType client = ModManager.clientInstance;
+            if(client == null || client.netclient == null || ModManager.clientSync == null) return result;
+            foreach(PlayerNetworkData pnd in ModManager.clientSync.syncData.players.Values) {
+                if(pnd.clientId != client.netclient.ClientId && pnd.creature != null && !pnd.isSpawning) result.Add(pnd);
+            }
+            return result;
+        }
+
+        private static IEnumerator ExpectRemotePlayers(AutopilotStep step) {
+            while(RemoteAvatars().Count < step.Int("count")) {
+                if(!Connected()) { failure = "not connected"; yield break; }
+                yield return Poll;
+            }
+            foreach(PlayerNetworkData pnd in RemoteAvatars()) Debug.Log(Prefix + "INFO remote player " + pnd.clientId + " " + pnd.name + " (" + pnd.creatureId + ") at " + pnd.creature.transform.position);
+        }
+
+        private static IEnumerator ExpectRemotePlayerMoved(AutopilotStep step) {
+            var start = new System.Collections.Generic.Dictionary<int, Vector3>();
+            while(true) {
+                if(!Connected()) { failure = "not connected"; yield break; }
+                foreach(PlayerNetworkData pnd in RemoteAvatars()) {
+                    Vector3 now = pnd.creature.transform.position;
+                    Vector3 first;
+                    if(!start.TryGetValue(pnd.clientId, out first)) { start[pnd.clientId] = now; continue; }
+                    float moved = Vector3.Distance(first, now);
+                    if(moved >= step.Int("minDistance")) {
+                        Debug.Log(Prefix + "INFO remote player " + pnd.clientId + " moved " + moved.ToString("0.00") + " m (" + first + " -> " + now + ")");
+                        yield break;
+                    }
+                }
+                yield return Poll;
+            }
+        }
+
+        private static IEnumerator SpawnItem(AutopilotStep step) {
+            ItemData data = Catalog.GetData<ItemData>(step.Str("dataId"), false);
+            if(data == null) { failure = "no item " + step.Str("dataId") + " in the catalog"; yield break; }
+            if(Player.currentCreature == null) { failure = "no player to spawn the item at"; yield break; }
+            Transform body = Player.currentCreature.transform;
+            Vector3 at = body.position + body.forward * 1f + Vector3.up * 1.5f; // in the air: it falls, so its position gets synced too
+            Item spawned = null;
+            bool done = false;
+            data.SpawnAsync(item => { spawned = item; done = true; }, at, Quaternion.identity);
+            while(!done) yield return Poll;
+            if(spawned == null) { failure = "spawning " + step.Str("dataId") + " failed"; yield break; }
+            // Synced: the server answered with a network id for it
+            while(true) {
+                if(!Connected()) { failure = "not connected"; yield break; }
+                ItemNetworkData ind = ModManager.clientSync.syncData.items.Values.FirstOrDefault(i => i.clientsideItem == spawned && i.networkedId > 0);
+                if(ind != null) { Debug.Log(Prefix + "INFO spawned " + ind.dataId + " has network id " + ind.networkedId); yield break; }
+                yield return Poll;
+            }
+        }
+
+        private static IEnumerator ExpectItemSynced(AutopilotStep step) {
+            while(true) {
+                if(!Connected()) { failure = "not connected"; yield break; }
+                ItemNetworkData ind = ModManager.clientSync.syncData.items.Values.FirstOrDefault(i => i.dataId == step.Str("dataId") && i.networkedId > 0 && i.clientsideId <= 0 && i.clientsideItem != null);
+                if(ind != null) { Debug.Log(Prefix + "INFO item " + ind.dataId + " (" + ind.networkedId + ") is in the game at " + ind.clientsideItem.transform.position); yield break; }
                 yield return Poll;
             }
         }

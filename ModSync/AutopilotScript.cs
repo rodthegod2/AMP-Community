@@ -36,6 +36,10 @@ namespace AMP.ModSync {
             { "host",                "port:int[1-32767] maxPlayers:int[1-64]? password:string?" }, // 32767: Netamite stores ports as short
             { "join",                "address:string port:int[1-32767] password:string?" },
             { "waitPlayers",         "count:int[1-64]" }, // host: this many players greeted (the host's own client counts)
+            { "expectRemotePlayers", "count:int[1-64]" }, // other players whose avatar (puppet) is spawned in our game
+            { "expectRemotePlayerMoved", "minDistance:int[1-100]" }, // a remote avatar moved this many meters from where it was first seen
+            { "spawnItem",           "dataId:string" },   // spawns a catalog item in front of the player and waits until the server gave it an id
+            { "expectItemSynced",    "dataId:string" },   // an item of another player with this id exists in our game
             { "expectModSync",       "blocks:bool" },
             { "downloadAndRestart",  "mode:mode" },
             { "expectRejoined",      "" },

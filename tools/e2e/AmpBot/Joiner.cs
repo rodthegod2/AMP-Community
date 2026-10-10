@@ -20,6 +20,9 @@ namespace AmpBot {
         private readonly object gate = new object();
         private IPClient client;
         private volatile bool finished;
+        private readonly GameplayWatch watch;
+        private BotPlayer player;
+        private int playerTickRate = 10;
 
         // Download state (guarded by gate)
         private ModCache cache;
@@ -44,6 +47,7 @@ namespace AmpBot {
             if(x.greeted) list.Expect("greeted");
             foreach(OptionValue v in x.snapshot) list.Expect("snapshot " + v.mod + "/" + v.option + (string.IsNullOrEmpty(v.title) ? "" : "=" + v.title));
             foreach(OptionValue v in x.settingChanged) list.Expect("settingChanged " + v.mod + "/" + v.option + "=" + v.title);
+            watch = new GameplayWatch(x, list);
         }
 
         // Connects (retrying while the host isn't up yet) and returns once connected; false when the deadline passed
@@ -61,6 +65,7 @@ namespace AmpBot {
                 answered.WaitOne(TimeSpan.FromSeconds(30));
                 if(c.IsConnected) {
                     Out.Info("connected to " + address + ":" + port + " as client " + c.ClientId);
+                    watch.IgnorePlayer(c.ClientId);
                     return true;
                 }
                 c.Disconnect();
@@ -72,6 +77,8 @@ namespace AmpBot {
         // Everything was seen: the host closing the connection from now on is expected
         public void Done() { finished = true; }
 
+        public void StopPlaying() { player?.Stop(); }
+
         public void Disconnect() {
             finished = true;
             try { client?.Disconnect(); } catch(Exception) { }
@@ -79,14 +86,38 @@ namespace AmpBot {
 
         private void Send(NetPacket packet) { client.SendReliable(packet); }
 
+        private volatile bool serverInfoSeen;
+
         private void OnPacket(NetPacket p) {
             try {
+                if(p is ServerInfoPacket) serverInfoSeen = true;
+                else if(!serverInfoSeen && x.quietBeforeGreeting && !(p is ModSyncPacket || p is ModFilePacket)) {
+                    list.Fail("got " + p.GetType().Name + " while still in mod sync (before the host's greeting)");
+                }
                 if(p is ModSyncPacket) OnModSync((ModSyncPacket) p);
                 else if(p is ModFilePacket) OnChunk((ModFilePacket) p);
                 else if(p is ServerInfoPacket) {
                     ServerInfoPacket info = (ServerInfoPacket) p;
+                    playerTickRate = info.player_tickrate;
                     list.Mark("greeted", "ServerInfo version " + info.version + ", max " + info.max_players);
-                } else if(p is LevelChangePacket) {
+                }
+                else if(p is AllowTransmissionPacket) {
+                    bool allow = ((AllowTransmissionPacket) p).allow;
+                    Out.Info("transmission " + (allow ? "allowed" : "stopped"));
+                    if(allow && x.play) StartPlaying();
+                }
+                else if(p is PlayerDataPacket) watch.OnPlayerData((PlayerDataPacket) p);
+                else if(p is PlayerEquipmentPacket) watch.OnEquipment((PlayerEquipmentPacket) p);
+                else if(p is PlayerPositionPacket) watch.OnPlayerMoved(((PlayerPositionPacket) p).playerId, ((PlayerPositionPacket) p).position);
+                else if(p is PlayerRagdollPacket) watch.OnPlayerMoved(((PlayerRagdollPacket) p).playerId, ((PlayerRagdollPacket) p).position);
+                else if(p is ItemSpawnPacket) {
+                    ItemSpawnPacket item = (ItemSpawnPacket) p;
+                    bool ours = item.clientsideId == OurItem && player != null && item.type == x.playItem;
+                    if(ours) player.ItemHasId(item.itemId);
+                    watch.OnItemSpawn(item, ours);
+                }
+                else if(p is ItemPositionPacket) watch.OnItemMoved((ItemPositionPacket) p);
+                else if(p is ItemOwnerPacket) Out.Info("item " + ((ItemOwnerPacket) p).itemId + (((ItemOwnerPacket) p).owning ? " is ours" : " belongs to someone else")); else if(p is LevelChangePacket) {
                     // Like a joiner that already is in the host's level: answer with the same level, loading finished
                     LevelChangePacket level = (LevelChangePacket) p;
                     Out.Info("host level " + level.level + " / " + level.mode + ", answering as loaded");
@@ -95,6 +126,23 @@ namespace AmpBot {
             } catch(Exception e) {
                 list.Fail("handling " + p.GetType().Name + " threw " + e);
             }
+        }
+
+        private const int OurItem = 1; // clientsideId of the one item the bot spawns; the host echoes it with the network id
+
+        // Like ClientSync.PlayerTickThread once transmission is allowed: player data, equipment, mod list, then positions
+        private void StartPlaying() {
+            lock(gate) {
+                if(player != null) return;
+                IPClient c = client;
+                player = new BotPlayer(x, playerTickRate, () => c.FixedTimestamp, packet => c.SendReliable(packet), packet => c.SendUnreliable(packet));
+                player.SpawnItemNow += () => {
+                    Out.Info("spawning " + x.playItem);
+                    c.SendReliable(player.ItemSpawn(0, OurItem));
+                };
+            }
+            player.Start(client.ClientId, watch.LastOtherPosition ?? new Netamite.Datatype.Vector3(0, 0, 0), "AmpBot");
+            client.SendReliable(new ModListPacket { modList = new[] { "AMP" } });
         }
 
         private void OnModSync(ModSyncPacket packet) {
@@ -227,6 +275,12 @@ namespace AmpBot {
             if(message == null || message.values == null) return;
             string what = kind == ModSyncPacket.SETTINGS_SNAPSHOT ? "snapshot" : "settingChanged";
             Out.Info(what + ": " + string.Join(", ", message.values.Select(v => v.mod + "/" + v.option + "=" + v.title + " [" + v.index + "]")));
+            if(kind == ModSyncPacket.SETTING_CHANGED) {
+                foreach(OptionValue no in x.noSettingChanged) {
+                    if(message.values.Any(v => v != null && v.mod == no.mod && v.option == no.option && v.title == no.title))
+                        list.Fail("SETTING_CHANGED " + no.mod + "/" + no.option + "=" + no.title + " arrived although that value didn't change");
+                }
+            }
             List<OptionValue> wanted = kind == ModSyncPacket.SETTINGS_SNAPSHOT ? x.snapshot : x.settingChanged;
             foreach(OptionValue w in wanted) {
                 OptionValue got = message.values.FirstOrDefault(v => v != null && v.mod == w.mod && v.option == w.option);

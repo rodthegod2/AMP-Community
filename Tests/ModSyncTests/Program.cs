@@ -801,6 +801,17 @@ internal static class Program {
     }
 
     private static void SettingsTests() {
+        var sent = new SentSettings();
+        Func<string, int, OptionValue> pvp = (title, index) => new OptionValue { mod = "MultiplayerMod", option = "PvP", title = title, index = index };
+        sent.Remember(pvp("Enabled", 1));
+        T("applying the value joiners already have is not a change", !sent.IsChange(pvp("Enabled", 1)));
+        T("a different value is a change", sent.IsChange(pvp("Disabled", 0)));
+        T("...and is remembered", !sent.IsChange(pvp("Disabled", 0)));
+        T("an option never seen counts as a change", sent.IsChange(new OptionValue { mod = "Other", option = "PvP", title = "Disabled", index = 0 }));
+        sent.Clear();
+        T("after Clear everything is a change again", sent.IsChange(pvp("Disabled", 0)));
+        T("null is never a change", !sent.IsChange(null));
+
         var personal  = new[] { "MyTool" };
         var overrides = new System.Collections.Generic.Dictionary<string, string> { { "SpellMod/Spell Volume", "server" }, { "SpellMod/Damage", "personal" } };
 
@@ -993,6 +1004,12 @@ internal static class Program {
         T("the swap mode is normalized", full.Steps[4].Str("mode") == "Temporary");
         T("a wait step gets time for the wait itself", full.Steps[11].TimeoutSec == 35);
 
+        var gameplay = Parse(@"[{""step"":""expectRemotePlayers"",""count"":1},{""step"":""expectRemotePlayerMoved"",""minDistance"":1},
+                                {""step"":""spawnItem"",""dataId"":""DaggerCommon""},{""step"":""expectItemSynced"",""dataId"":""SwordShortCommon""}]", out error);
+        T("gameplay steps parse (" + error + ")", gameplay != null && gameplay.Steps[0].Int("count") == 1 && gameplay.Steps[1].Int("minDistance") == 1
+                                                   && gameplay.Steps[2].Str("dataId") == "DaggerCommon" && gameplay.Steps[3].Str("dataId") == "SwordShortCommon");
+        T("spawnItem needs an item id", Rejected(@"[{""step"":""spawnItem""}]", "dataId") && Rejected(@"[{""step"":""spawnItem"",""dataId"":"" ""}]", "dataId"));
+        T("expectRemotePlayerMoved needs a positive distance", Rejected(@"[{""step"":""expectRemotePlayerMoved"",""minDistance"":0}]", "minDistance"));
         var players = Parse(@"[{""step"":""waitPlayers"",""count"":2}]", out error);
         T("waitPlayers parses (" + error + ")", players != null && players.Steps[0].Int("count") == 2);
         T("waitPlayers needs a count of at least 1", Rejected(@"[{""step"":""waitPlayers"",""count"":0}]", "count") && Rejected(@"[{""step"":""waitPlayers""}]", "count"));
