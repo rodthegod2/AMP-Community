@@ -24,6 +24,7 @@ internal static class Program {
         ApplierTests();
         HelperTests();
         ProfileTests();
+        ReleaseInfoTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -817,5 +818,40 @@ internal static class Program {
         T("unknown title is no match", SettingsRules.MatchIndex(titles, new OptionValue { index = 1, title = "Ultra" }) == -1);
         T("out of range index with unknown title is no match", SettingsRules.MatchIndex(titles, new OptionValue { index = 9, title = "?" }) == -1);
         T("no titles is no match", SettingsRules.MatchIndex(new string[0], new OptionValue { index = 0, title = "Off" }) == -1);
+    }
+
+    private const string ReleaseJson = @"{ ""tag_name"": ""v1.2.0"", ""draft"": false, ""prerelease"": false, ""body"": ""Fixes"",
+      ""assets"": [
+        { ""name"": ""SHA256SUMS.txt"", ""browser_download_url"": ""https://github.com/o/r/releases/download/v1.2.0/SHA256SUMS.txt"", ""size"": 100 },
+        { ""name"": ""AMP-Community-1.2.0.zip"", ""browser_download_url"": ""https://github.com/o/r/releases/download/v1.2.0/AMP-Community-1.2.0.zip"", ""size"": 2000 } ] }";
+
+    private static void ReleaseInfoTests() {
+        ReleaseInfo r = ReleaseInfo.Parse(ReleaseJson);
+        T("release parses", r != null && r.tag == "v1.2.0" && r.version == "1.2.0" && r.notes == "Fixes");
+        T("release assets are read", r != null && r.assets.Count == 2 && r.assets[1].name == "AMP-Community-1.2.0.zip"
+            && r.assets[1].url.EndsWith("/AMP-Community-1.2.0.zip") && r.assets[1].size == 2000);
+        T("draft release is ignored", ReleaseInfo.Parse(ReleaseJson.Replace("\"draft\": false", "\"draft\": true")) == null);
+        T("prerelease is ignored", ReleaseInfo.Parse(ReleaseJson.Replace("\"prerelease\": false", "\"prerelease\": true")) == null);
+        T("garbage is not a release", ReleaseInfo.Parse("{not json") == null && ReleaseInfo.Parse("[]") == null && ReleaseInfo.Parse(null) == null);
+        T("a release without a tag is rejected", ReleaseInfo.Parse("{ \"body\": \"x\" }") == null);
+
+        T("1.2.0 < 1.10.0", ReleaseInfo.CompareVersions("1.2.0", "1.10.0") < 0);
+        T("1.0 == 1.0.0", ReleaseInfo.CompareVersions("1.0", "1.0.0") == 0);
+        T("1.0.1 > 1.0.0", ReleaseInfo.CompareVersions("1.0.1", "1.0.0") > 0);
+        T("a non-numeric version is never newer", ReleaseInfo.CompareVersions("abc", "0.0.1") < 0 && ReleaseInfo.CompareVersions("1.0.0", "abc") > 0);
+
+        T("zip asset is picked", ReleaseInfo.ZipAsset(r) != null && ReleaseInfo.ZipAsset(r).name == "AMP-Community-1.2.0.zip");
+        T("no zip asset gives null", ReleaseInfo.ZipAsset(new ReleaseInfo { assets = { new ReleaseAsset { name = "SHA256SUMS.txt" } } }) == null);
+
+        string a = "ABCDEF" + new string('0', 58), b = new string('b', 64);
+        string sums = a + "  AMP-Community-1.2.0.zip\r\n" + b + " *Other.zip\n";
+        T("checksum of the zip (two-space format) is lowercase", ReleaseInfo.ExpectedSha256(sums, "AMP-Community-1.2.0.zip") == a.ToLowerInvariant());
+        T("checksum in binary format (* name) is read", ReleaseInfo.ExpectedSha256(sums, "Other.zip") == b);
+        T("missing checksum gives null", ReleaseInfo.ExpectedSha256(sums, "Nope.zip") == null && ReleaseInfo.ExpectedSha256(null, "x") == null);
+
+        T("github https urls are trusted", ReleaseInfo.IsTrustedUrl("https://github.com/x") && ReleaseInfo.IsTrustedUrl("https://api.github.com/repos/x")
+            && ReleaseInfo.IsTrustedUrl("https://objects.githubusercontent.com/x") && ReleaseInfo.IsTrustedUrl("https://release-assets.githubusercontent.com/x"));
+        T("http or lookalike urls are not trusted", !ReleaseInfo.IsTrustedUrl("http://github.com/x") && !ReleaseInfo.IsTrustedUrl("https://github.com.evil.com/x")
+            && !ReleaseInfo.IsTrustedUrl("https://evil.com/github.com") && !ReleaseInfo.IsTrustedUrl("https://github.com@evil.com/x") && !ReleaseInfo.IsTrustedUrl(null));
     }
 }

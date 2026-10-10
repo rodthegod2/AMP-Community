@@ -27,6 +27,7 @@
     <Compile Include="..\..\ModSync\JournalApplier.cs" />
     <Compile Include="..\..\ModSync\HelperScript.cs" />
     <Compile Include="..\..\ModSync\ProfileSeeder.cs" />
+    <Compile Include="..\..\ModSync\ReleaseInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- The game's copy fails .NET Framework strong-name validation when loaded outside Unity, so use the signed package -->
