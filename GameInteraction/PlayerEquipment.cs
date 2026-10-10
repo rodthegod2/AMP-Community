@@ -29,8 +29,9 @@ namespace AMP.GameInteraction {
         internal static void Apply(Creature creature, Color[] colors, string[] wardrobe, string ethnicGroup) {
             if(creature == null) return;
 
-            creature.ApplyColors(colors);
-            creature.ApplyWardrobe(wardrobe);
+            // Netamite delivers an empty array as null (a player without wardrobe), and the packet comes from another player
+            if(colors != null && colors.Length >= 6) creature.ApplyColors(colors);
+            if(wardrobe != null) creature.ApplyWardrobe(wardrobe);
             if(ethnicGroup != null && ethnicGroup.Length > 0) creature.SetEthnicGroupFromId(ethnicGroup);
         }
 
