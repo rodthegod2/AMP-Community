@@ -23,6 +23,7 @@ internal static class Program {
         JournalTests();
         ApplierTests();
         HelperTests();
+        ProfileTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -631,6 +632,38 @@ internal static class Program {
         var nullHost = Host("windows", M("A"));
         nullHost.mods.Add(null);
         T("null entries in host and local lists are ignored", P(nullHost, "windows", M("A"), null).steps.Count == 0);
+    }
+
+    private static void ProfileTests() {
+        using(var f = new TestFolders()) {
+            string def = Path.Combine(f.Root, "Saves", "Default");
+            string prof = Path.Combine(f.Root, "Saves", ProfileSeeder.ProfileFolderName);
+            Directory.CreateDirectory(def);
+            File.WriteAllText(Path.Combine(def, "Options.opt"), "opt1");
+            File.WriteAllText(Path.Combine(def, "a.chr"), "A");
+            File.WriteAllText(Path.Combine(def, "b.chr"), "B");
+            File.WriteAllText(Path.Combine(def, "steam_autocloud.vdf"), "x");
+            T("seeding succeeds", ProfileSeeder.EnsureSeeded(def, prof));
+            T("options and both characters are copied", File.ReadAllText(Path.Combine(prof, "Options.opt")) == "opt1"
+                && File.ReadAllText(Path.Combine(prof, "a.chr")) == "A" && File.ReadAllText(Path.Combine(prof, "b.chr")) == "B");
+            T("other files are not copied", !File.Exists(Path.Combine(prof, "steam_autocloud.vdf")));
+            T("the originals are untouched", File.ReadAllText(Path.Combine(def, "a.chr")) == "A");
+
+            File.WriteAllText(Path.Combine(def, "Options.opt"), "opt2");
+            File.WriteAllText(Path.Combine(prof, "a.chr"), "A-mp");
+            T("a second call leaves an existing profile alone", ProfileSeeder.EnsureSeeded(def, prof)
+                && File.ReadAllText(Path.Combine(prof, "Options.opt")) == "opt1" && File.ReadAllText(Path.Combine(prof, "a.chr")) == "A-mp");
+
+            string empty = Path.Combine(f.Root, "Saves", "Empty");
+            T("a missing Default folder still gives an empty profile", ProfileSeeder.EnsureSeeded(Path.Combine(f.Root, "nope"), empty)
+                && Directory.Exists(empty) && Directory.GetFiles(empty).Length == 0);
+
+            string stale = Path.Combine(f.Root, "Saves", "Stale");
+            Directory.CreateDirectory(stale + ".seeding");
+            File.WriteAllText(Path.Combine(stale + ".seeding", "junk.chr"), "junk");
+            T("a leftover .seeding folder is replaced", ProfileSeeder.EnsureSeeded(def, stale)
+                && !File.Exists(Path.Combine(stale, "junk.chr")) && File.Exists(Path.Combine(stale, "a.chr")) && !Directory.Exists(stale + ".seeding"));
+        }
     }
 
     private static void ChunkTests() {
