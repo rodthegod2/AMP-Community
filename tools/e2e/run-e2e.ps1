@@ -29,6 +29,8 @@ $SloMo     = 'InstantSloMo'                                  # fixture copy of t
 $SloMoId   = 2512544
 $FasciaId  = 5966899                                         # mod.io Fascia (separate Windows and Android files)
 $ZeroEffortId = 2512494                                      # mod.io "Zero Effort", the _TrueZeroEffort fixture
+$SsdpPort  = $Port + 10                                      # the bot's fake UPnP router (host-upnp-fake)
+$Code127   = 'HW22-22DB-AWJ6'                               # join code of 127.0.0.1:26951 (pinned in Tests/ModSyncTests/NatTests.cs)
 # The player's real mod.io data (login, subscriptions, installed mod.io mods): tests isolate mod.io into the run folder, this proves it
 $ModioReal = @((Join-Path $env:LOCALAPPDATA 'mod.io\03852'), (Join-Path $env:LOCALAPPDATA 'mod.io\globalsettings.json'), (Join-Path $env:PUBLIC 'mod.io\3852'))
 
@@ -36,6 +38,7 @@ $ModioReal = @((Join-Path $env:LOCALAPPDATA 'mod.io\03852'), (Join-Path $env:LOC
 # fixture under another folder name. GameSetup/BotSetup: script blocks run on the staged folder (fixture variants). GameArgs: extra game arguments.
 # Relaunches: how often the runner starts the game again after it closed for a restart (the Quest flow: the player starts it, not AMP).
 # RestoreInGame: the swap is undone by the game itself when it quits (Quest), not by the helper.
+# BotArgs: the bot's connection arguments instead of --host/--join. {RUN} in BotArgs and in script strings is the run folder.
 $Scenarios = [ordered]@{
     'host-basic' = @{
         GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
@@ -66,6 +69,23 @@ $Scenarios = [ordered]@{
                      @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'wait'; seconds = 10 }, @{ step = 'quit' })
         Expect   = @{ greeted = $true; quietBeforeGreeting = $true; play = $true; playItem = 'SwordShortCommon'; equipment = @(); seePlayers = 1; seePlayerMoves = 3; seeItems = @('DaggerCommon'); seeItemMoves = 3; lingerSec = 15 }
     }
+    'host-joincode' = @{
+        # A friend on the same Wi-Fi: the game hosts, writes its Same Wi-Fi code (this PC's LAN address), the bot joins with that code.
+        # Test runs never talk to the real router: the port mapping must say Off.
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'; BotArgs = '--join-code-file {RUN}\joincode.txt'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'expectPortMapping'; state = 'Off' },
+                     @{ step = 'writeJoinCode'; file = '{RUN}\joincode.txt'; kind = 'lan' }, @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 5 }, @{ step = 'quit' })
+        Expect   = @{ planBlocks = $false; greeted = $true }
+    }
+    'host-upnp-fake' = @{
+        # The full UPnP flow against the bot's fake router (-amp-test-ssdp, honoured only in test runs): SSDP, description, external address,
+        # TCP+UDP mapped with lease 7200, the Internet code (the fake's internet address is 127.0.0.1) lets the bot join, both mappings removed on quit
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'; BotArgs = "--join-code-file {RUN}\joincode.txt --fake-igd $SsdpPort"
+        GameArgs = @('-amp-test-ssdp', "127.0.0.1:$SsdpPort")
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'expectPortMapping'; state = 'Open' },
+                     @{ step = 'writeJoinCode'; file = '{RUN}\joincode.txt'; kind = 'internet' }, @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 5 }, @{ step = 'quit' })
+        Expect   = @{ planBlocks = $false; greeted = $true; lingerSec = 2 }
+    }
     'join-identical' = @{
         GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'host'
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $false }, @{ step = 'wait'; seconds = 3 },
@@ -79,6 +99,13 @@ $Scenarios = [ordered]@{
                      @{ step = 'expectRemotePlayers'; count = 1 }, @{ step = 'expectRemotePlayerMoved'; minDistance = 1 }, @{ step = 'expectItemSynced'; dataId = 'SwordShortCommon' },
                      @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'wait'; seconds = 10 }, @{ step = 'quit' })
         Expect   = @{ reports = @('ready'); greetings = 1; play = $true; playItem = 'SwordShortCommon'; seePlayers = 1; seePlayerMoves = 3; seeItems = @('DaggerCommon'); seeItemMoves = 3; lingerSec = 15 }
+    }
+    'join-code' = @{
+        # The game joins by typing a join code (no port): the same parsing as the book's "Join Code / IP" page
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'host'
+        Skip     = { if ($Port -ne 26951) { "the pinned code is for port 26951 (this run uses $Port)" } }
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = $Code127 }, @{ step = 'expectModSync'; blocks = $false }, @{ step = 'wait'; seconds = 3 }, @{ step = 'quit' })
+        Expect   = @{ reports = @('ready'); greetings = 1; lingerSec = 10 }
     }
     'self-update' = @{
         # A 0.9.9 build finds the latest published release on GitHub, downloads it (redirects to the asset host), swaps itself and relaunches.
@@ -319,7 +346,7 @@ function Invoke-Scenario([string]$Name) {
     $seed = Join-Path $docs 'My Games\BladeAndSorcery\Saves\Default'
     New-Item -ItemType Directory -Force -Path $seed | Out-Null
     Copy-Item -LiteralPath (Get-ChildItem -LiteralPath $SavesSrc -Filter *.chr | Sort-Object Name | Select-Object -First 1).FullName, "$SavesSrc\Options.opt" -Destination $seed
-    ConvertTo-Json -InputObject @($s.Script) -Depth 5 | Set-Content -LiteralPath $script -Encoding ascii
+    (ConvertTo-Json -InputObject @($s.Script) -Depth 5).Replace('{RUN}', $run.Replace('\', '\\')) | Set-Content -LiteralPath $script -Encoding ascii
     $x = @{ timeoutSec = 60 * $TimeoutMin - 60 } + $s.Expect
     ConvertTo-Json -InputObject $x -Depth 5 | Set-Content -LiteralPath $expect -Encoding ascii
     $botMods = Join-Path $run 'bot-mods'
@@ -337,7 +364,7 @@ function Invoke-Scenario([string]$Name) {
         if ($s.GameSetup) { & $s.GameSetup $ModsDir }
         $staged = @(Get-ModsShape $ModsDir)
 
-        $botArgs = if ($s.BotMode -eq 'host') { "--host $Port" } else { "--join 127.0.0.1 $Port" }
+        $botArgs = if ($s.BotArgs) { $s.BotArgs.Replace('{RUN}', $run) } elseif ($s.BotMode -eq 'host') { "--host $Port" } else { "--join 127.0.0.1 $Port" }
         if ($s.BotMode -ne 'none') {
         $bot = Start-Process -FilePath $BotExe -ArgumentList "$botArgs --mods $botMods --cache $(Join-Path $run 'bot-cache') --expect $expect" `
                              -RedirectStandardOutput (Join-Path $run 'bot.log') -RedirectStandardError (Join-Path $run 'bot.err') -PassThru -WindowStyle Hidden

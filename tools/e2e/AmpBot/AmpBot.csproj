@@ -22,6 +22,8 @@
     <Compile Include="..\..\..\ModSync\TransferReceiver.cs" />
     <Compile Include="..\..\..\ModSync\ModCache.cs" />
     <Compile Include="..\..\..\ModSync\SettingsRules.cs" />
+    <Compile Include="..\..\..\Network\Nat\JoinCodes.cs" />
+    <Compile Include="..\..\..\Tests\ModSyncTests\FakeIgd.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Netamite">

@@ -31,29 +31,52 @@ select or a dungeon). Use a separate save/character for multiplayer.
 2. HOST (one person, on PC)
 ---------------------------
 In VR: open the book -> Mods -> AMP -> "Host" tab -> "Host on PC".
-The status line then shows your port (default 26950) and LAN IP.
 (Without the headset: press H on the keyboard for the desktop window,
 "Host Server ->".)
 
-Windows will ask whether Blade & Sorcery may use the network the first
-time: click Allow.
+AMP then opens the port on your router by itself (UPnP) and shows a
+JOIN CODE on the AMP page, like  K7QX-29MB :
+ - "Internet code": for friends anywhere (PC or Quest).
+ - "Same Wi-Fi code": for friends in the same house / on the same Wi-Fi.
+ - below them: your plain IP:port and what your router said.
+Send your friends the code. The code is just your address in short form:
+give it only to people you want to play with. A new code can appear when
+your internet provider gives you a new address.
 
-Your friends need an address they can reach. Pick ONE:
+The port is removed from your router again when you stop hosting or quit
+the game (AMP only removes what it added; a port you forwarded yourself is
+left alone).
 
- a) Same house / same Wi-Fi: give them the "LAN IP" from the status line.
+Windows may ask whether Blade & Sorcery may use the network the first
+time: click Allow. (AMP never changes your firewall settings.)
 
- b) Over the internet, easiest: everyone installs Tailscale
-    (tailscale.com, free) or ZeroTier and joins the same network.
-    Give friends your Tailscale IP (starts with 100.). No router setup.
+When the page says internet joining doesn't work:
+ - "Your internet provider shares your IP ... needs a relay": your
+   provider (or a second router in front of yours) doesn't give you your
+   own internet address (CGNAT). Port forwarding can't fix that. Use the
+   Same Wi-Fi code at home, or a VPN like Tailscale (below).
+ - "No router answered the automatic port opening": turn on UPnP in your
+   router's settings (often under "NAT", "Advanced" or "Gaming"), host
+   again - or forward the port by hand (below).
+ - "Your router refused to open port ...": forward it by hand (below), or
+   pick another port if another device already uses it.
 
- c) Over the internet, port forwarding: in your router, forward
-    port 26950 for BOTH TCP and UDP to your PC's LAN IP.
-    Give friends your public IP (search "what is my ip").
+Fallbacks (only when the code doesn't work):
+ a) Tailscale (tailscale.com, free) or ZeroTier: everyone installs it and
+    joins the same network; friends type your Tailscale IP (starts with
+    100.) instead of a code. No router setup, works with CGNAT.
+ b) Port forwarding by hand: in your router, forward port 26950 for BOTH
+    TCP and UDP to your PC's LAN IP (shown on the AMP page). Then the
+    Internet code works.
+
+Turn the automatic port opening off: config.json -> "hostingSettings" ->
+"autoPortForward": false.
 
 Password / max players / port: after the first launch, edit
   Documents\My Games\BladeAndSorcery\Saves\Default\Mods\MultiplayerMod\config.json
   "inputCache": host_password, host_max_players (default 4), host_port
-Keep the port between 1 and 32767.
+Keep the port between 1 and 32767. With the default port 26950 codes are
+8 characters, with another port 12 (XXXX-XXXX-XXXX).
 
 As host you are lobby admin: you can kick and ban from the player list
 (a ban lasts until you stop hosting).
@@ -61,13 +84,18 @@ As host you are lobby admin: you can kick and ban from the player list
 
 3. JOIN (friends)
 -----------------
-Book -> Mods -> AMP -> "Join" -> "Direct (IP)".
-Enter the host's address (from step 2), port 26950, and the password if
-there is one, then press ">".
+Book -> Mods -> AMP -> "Join" -> "Join Code / IP".
+Type the host's code into "Code or IP" with the book's keyboard (capital
+or small letters, the dash is optional; codes never contain 0, O, 1 or I),
+the password if there is one, then press ">".
+An IP address works in the same field too: 192.168.1.20 (uses the Port
+field) or 203.0.113.5:26950.
+(Desktop window, H key: "Join Server ->", the code goes into "IP".)
 
 If it fails you get a message:
- - "Can't reach ..."  -> wrong address, host not running, or ports not
-                         forwarded / not on the same Tailscale network.
+ - "This code has a typo" -> check every letter with the host.
+ - "Can't reach ..."  -> wrong code, host not running, or the host's AMP
+                         page doesn't say the port is open (see section 2).
  - "Wrong password", "Server is full" -> as it says.
  - "Lost connection"  -> the host left or the connection dropped
                          (now detected within ~15 seconds).
@@ -167,10 +195,12 @@ Install on Quest (needs a PC and a USB cable, the same zip as on PC):
  a mod.io listing is planned so Quest players can install it in-game.
 
 Join a PC host:
- - Book -> Mods -> AMP -> "Join" -> "Direct (IP)", as in section 3.
-   Setting up the host's mods needs this direct join: after the restart the
-   game reconnects to that address by itself (server list / lobby joins
-   can't set up mods).
+ - Book -> Mods -> AMP -> "Join" -> "Join Code / IP": type the host's
+   Internet code (or the Same Wi-Fi code at home), as in section 3.
+   Quest has no Steam, so the code (or an IP) is the way in.
+   Setting up the host's mods needs this join: after the restart the game
+   reconnects to that address by itself (server list / lobby joins can't
+   set up mods).
  - Your mods are compared with the host's. Quest players get mods from
    mod.io, never from the host (PC files don't work on Quest):
     * mods the host installed from mod.io, if that mod.io page has a Quest

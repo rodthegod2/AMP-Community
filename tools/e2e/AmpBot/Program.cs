@@ -3,12 +3,15 @@ using Netamite.Logging;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 
 namespace AmpBot {
     // Usage:
     //   AmpBot --host <port> --mods <folder> [--cache <folder>] [--expect <file.json>]
     //   AmpBot --join <address> <port> --mods <folder> [--cache <folder>] [--expect <file.json>]
+    //   AmpBot --join-code-file <file> ...   joins with the join code the game writes into file (autopilot writeJoinCode)
+    //   ... --fake-igd <ssdp port>           also runs a fake UPnP router (Tests/ModSyncTests/FakeIgd.cs) and checks the game's mappings
     //   AmpBot --selftest [<AMP repo folder>]   packet layouts vs AMP's sources + a host/joiner loopback
     // Prints BOT INFO/OK/FAIL/DONE lines; exit code 0 = every expectation was met, 1 = failure, 2 = bad usage.
     public static class Program {
@@ -40,9 +43,12 @@ namespace AmpBot {
             string mods = Value(a, "--mods", 1), cache = Value(a, "--cache", 1), expect = Value(a, "--expect", 1);
             string host = Value(a, "--host", 1);
             string join = Value(a, "--join", 1), joinPort = Value(a, "--join", 2);
-            int port;
-            if(mods == null || (host == null) == (join == null) || !int.TryParse(host ?? joinPort, out port) || port < 1 || port > 32767) {
-                Console.Error.WriteLine("usage: AmpBot --host <port> | --join <address> <port>  --mods <folder> [--cache <folder>] [--expect <file.json>]");
+            string codeFile = Value(a, "--join-code-file", 1), fakeIgdPort = Value(a, "--fake-igd", 1);
+            if(codeFile != null) { join = "(code)"; joinPort = "1"; }
+            int port, ssdpPort = 0;
+            if(mods == null || (host == null) == (join == null) || !int.TryParse(host ?? joinPort, out port) || port < 1 || port > 32767
+               || (fakeIgdPort != null && (!int.TryParse(fakeIgdPort, out ssdpPort) || ssdpPort < 1 || ssdpPort > 65535))) {
+                Console.Error.WriteLine("usage: AmpBot --host <port> | --join <address> <port> | --join-code-file <file>  --mods <folder> [--cache <folder>] [--expect <file.json>] [--fake-igd <ssdp port>]");
                 return 2;
             }
             if(!Directory.Exists(mods)) { Out.Line("FAIL", "mods folder not found: " + mods); return 1; }
@@ -52,6 +58,10 @@ namespace AmpBot {
             Expectations x = Expectations.Load(expect);
             var list = new Checklist();
             DateTime deadline = DateTime.UtcNow.AddSeconds(x.timeoutSec);
+            // A fake UPnP router on 127.0.0.1 whose "internet address" is 127.0.0.1, so the game's Internet code works here
+            FakeIgd igd = fakeIgdPort == null ? null : new FakeIgd(ssdpPort) { ExternalIp = "127.0.0.1" };
+            if(igd != null) Out.Info("fake UPnP router answering SSDP on 127.0.0.1:" + ssdpPort);
+            if(codeFile != null && !JoinByCode(codeFile, deadline, out join, out port)) return Finish(false, list);
             bool ok;
             if(host != null) {
                 var hoster = new Hoster(port, mods, cache, x, list);
@@ -67,7 +77,36 @@ namespace AmpBot {
                 joiner.StopPlaying();
                 joiner.Disconnect();
             }
+            if(ok && igd != null) ok = CheckFakeIgd(igd, port, list);
+            igd?.Dispose();
             return Finish(ok, list);
+        }
+
+        // The game writes its join code into the file once it hosts; the bot reads it like a friend would type it
+        private static bool JoinByCode(string file, DateTime deadline, out string host, out int port) {
+            host = null; port = 0;
+            Out.Info("waiting for the join code in " + file);
+            while(!File.Exists(file)) {
+                if(DateTime.UtcNow > deadline) { Out.Line("FAIL", "no join code appeared in " + file); return false; }
+                Thread.Sleep(250);
+            }
+            string code = File.ReadAllText(file).Trim(), error;
+            if(!AMP.Network.Nat.JoinTarget.TryParse(code, "", out host, out port, out error)) { Out.Line("FAIL", "join code " + code + ": " + error); return false; }
+            Out.Info("join code " + code + " -> " + host + ":" + port);
+            return true;
+        }
+
+        // The game mapped TCP and UDP for its port to this PC through the fake router, and removed both when it stopped hosting
+        private static bool CheckFakeIgd(FakeIgd igd, int port, Checklist list) {
+            string[] wanted = { "AddPortMapping TCP " + port + " 127.0.0.1 7200 AMP Community", "AddPortMapping UDP " + port + " 127.0.0.1 7200 AMP Community" };
+            DateTime until = DateTime.UtcNow.AddSeconds(120); // the game removes them when it quits
+            while(DateTime.UtcNow < until && !(igd.MappingCount() == 0 && igd.CallList().Contains("DeletePortMapping UDP " + port))) Thread.Sleep(250);
+            string[] calls = igd.CallList();
+            Out.Info("fake router calls: " + string.Join("; ", calls));
+            string missing = wanted.Concat(new[] { "DeletePortMapping TCP " + port, "DeletePortMapping UDP " + port }).FirstOrDefault(c => !calls.Contains(c));
+            if(missing != null || igd.MappingCount() != 0) { list.Fail("fake router: " + (missing != null ? "never got \"" + missing + "\"" : igd.MappingCount() + " mapping(s) left")); return false; }
+            Out.Line("OK", "fake router: TCP+UDP " + port + " mapped with lease 7200 and removed again");
+            return true;
         }
 
         internal static int Finish(bool ok, Checklist list) {
