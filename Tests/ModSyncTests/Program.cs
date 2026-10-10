@@ -302,13 +302,13 @@ internal static class Program {
 
             T("apply succeeds", JournalApplier.Apply(j, f.Mods, cacheRoot, journalDir) && j.state == SwapState.Applied);
             T("extra mod disabled", Directory.Exists(Path.Combine(f.Mods, "_AMPoff_Extra")) && !Directory.Exists(Path.Combine(f.Mods, "Extra")));
-            T("old mod moved aside, host version installed", File.ReadAllText(Path.Combine(f.Mods, "_AMPold_Old", "v.txt")) == "mine" && File.ReadAllText(Path.Combine(f.Mods, "Old", "v.txt")) == "host");
+            T("old mod moved aside, host version installed", File.ReadAllText(Path.Combine(cacheRoot, "old", j.id, "Old", "v.txt")) == "mine" && File.ReadAllText(Path.Combine(f.Mods, "Old", "v.txt")) == "host");
             T("new mod installed from cache", File.Exists(Path.Combine(f.Mods, "New", "manifest.json")));
             T("host load order written", File.ReadAllText(Path.Combine(f.Mods, "loadorder.json")).Contains("New"));
 
             T("temporary restore succeeds", JournalApplier.Restore(j, f.Mods, cacheRoot, journalDir) && j.state == SwapState.Restored);
             T("everything is back", File.ReadAllText(Path.Combine(f.Mods, "Old", "v.txt")) == "mine" && Directory.Exists(Path.Combine(f.Mods, "Extra"))
-                                     && !Directory.Exists(Path.Combine(f.Mods, "New")) && !Directory.Exists(Path.Combine(f.Mods, "_AMPold_Old")));
+                                     && !Directory.Exists(Path.Combine(f.Mods, "New")) && !Directory.Exists(Path.Combine(cacheRoot, "old", j.id, "Old")));
             T("cache entries are back", File.Exists(Path.Combine(cacheRoot, "mods", hNew, "content", "manifest.json")));
             T("original load order is back", File.ReadAllText(Path.Combine(f.Mods, "loadorder.json")).Contains("Extra") && !File.ReadAllText(Path.Combine(f.Mods, "loadorder.json")).Contains("New"));
 
@@ -317,7 +317,8 @@ internal static class Program {
             T("keep apply succeeds", JournalApplier.Apply(keep, f.Mods, cacheRoot, journalDir));
             T("keep restore succeeds", JournalApplier.Restore(keep, f.Mods, cacheRoot, journalDir));
             T("keep: extra re-enabled, host mods stay", Directory.Exists(Path.Combine(f.Mods, "Extra")) && Directory.Exists(Path.Combine(f.Mods, "New"))
-                                                       && File.ReadAllText(Path.Combine(f.Mods, "Old", "v.txt")) == "host" && Directory.Exists(Path.Combine(f.Mods, "_AMPold_Old")));
+                                                       && File.ReadAllText(Path.Combine(f.Mods, "Old", "v.txt")) == "host" && Directory.Exists(Path.Combine(cacheRoot, "old", keep.id, "Old")));
+            T("keep: the helper is told where the old version is", JournalApplier.LastNote.Contains("previous version of Old") && JournalApplier.LastNote.Contains(keep.id));
 
             // Failure in the middle rolls back what was done
             using(var g = new TestFolders()) {
@@ -331,13 +332,16 @@ internal static class Program {
 
             // Rollback that can't finish must not claim "Restored"
             using(var g = new TestFolders()) {
-                g.Mod("A");
                 var stuck = new SwapJournal { mode = SwapMode.Temporary };
-                stuck.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "A", done = true }); // claims A is disabled, but _AMPoff_A doesn't exist: undo is impossible
+                stuck.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "A", done = true }); // claims A is disabled, but neither A nor _AMPoff_A exists: undo is impossible
                 stuck.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = "B", hash = new string('c', 64) }); // not in cache
                 T("apply fails when a later op can't run", !JournalApplier.Apply(stuck, g.Mods, Path.Combine(g.Root, "cache"), Path.Combine(g.Root, "j")));
                 T("...and a failed rollback leaves RestorePending", stuck.state == SwapState.RestorePending);
+                JournalApplier.Restore(stuck, g.Mods, Path.Combine(g.Root, "cache"), Path.Combine(g.Root, "j"));
+                T("a restore that can't finish is counted", stuck.restoreFailures == 1 && stuck.state == SwapState.RestorePending);
             }
+
+            CrashSafetyTests();
 
             using(var g = new TestFolders()) {
                 var evil = new SwapJournal();
@@ -346,6 +350,104 @@ internal static class Program {
             }
         }
         JournalApplier.RetryMs = savedRetryMs;
+    }
+
+    private static void CrashSafetyTests() {
+        using(var f = new TestFolders()) {
+            f.Mod("A"); f.Mod("B");
+            var j = new SwapJournal { mode = SwapMode.Temporary };
+            j.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "A" });
+            j.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "B" });
+            int saves = 0;
+            JournalApplier.Apply(j, f.Mods, Path.Combine(f.Root, "cache"), Path.Combine(f.Root, "j"), x => { saves++; });
+            T("the journal is saved before and after every op, and at the end", saves >= 2 * 2 + 1);
+        }
+
+        // A save that fails in the middle of an apply: everything done so far is rolled back
+        using(var g = new TestFolders()) {
+            g.Mod("A"); g.Mod("B");
+            var k = new SwapJournal { mode = SwapMode.Temporary };
+            k.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "A" });
+            k.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "B" });
+            int calls = 0;
+            bool ok = JournalApplier.Apply(k, g.Mods, Path.Combine(g.Root, "c"), Path.Combine(g.Root, "j"), x => { if(++calls == 3) throw new IOException("disk full"); });
+            T("a failing save rolls back and nothing is lost", !ok && Directory.Exists(Path.Combine(g.Mods, "A")) && Directory.Exists(Path.Combine(g.Mods, "B")) && k.state == SwapState.Restored);
+        }
+
+        // Crash right after the move but before "done" was saved: restore still finds it
+        using(var g = new TestFolders()) {
+            g.Mod("A"); g.Mod("B");
+            Directory.Move(Path.Combine(g.Mods, "A"), Path.Combine(g.Mods, "_AMPoff_A")); // moved, journal says only "started"
+            var crashed = new SwapJournal { mode = SwapMode.Temporary };
+            crashed.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "A", started = true });
+            crashed.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "B", started = true }); // started, never moved
+            T("restore after a crash puts both back", JournalApplier.Restore(crashed, g.Mods, Path.Combine(g.Root, "c"), Path.Combine(g.Root, "j"))
+                                                     && Directory.Exists(Path.Combine(g.Mods, "A")) && Directory.Exists(Path.Combine(g.Mods, "B")));
+            T("restoring again is harmless (idempotent)", JournalApplier.Restore(crashed, g.Mods, Path.Combine(g.Root, "c"), Path.Combine(g.Root, "j")) && crashed.state == SwapState.Restored);
+        }
+
+        // Something is in the way of the restore: it is moved aside, not deleted
+        using(var g = new TestFolders()) {
+            string a = g.Mod("A"); g.File_(a, "mine.txt", "mine");
+            var tj = new SwapJournal { mode = SwapMode.Temporary };
+            tj.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "A" });
+            string c = Path.Combine(g.Root, "c"), jd = Path.Combine(g.Root, "j");
+            JournalApplier.Apply(tj, g.Mods, c, jd);
+            string blocker = g.Mod("A"); g.File_(blocker, "theirs.txt", "theirs"); // a new A appeared meanwhile
+            T("restore with a blocker succeeds", JournalApplier.Restore(tj, g.Mods, c, jd));
+            T("...the original is back", File.ReadAllText(Path.Combine(g.Mods, "A", "mine.txt")) == "mine");
+            string aside = Directory.GetDirectories(g.Mods, "_AMPconflict_A_*").FirstOrDefault();
+            T("...the blocker is kept under a conflict name and recorded", aside != null && File.Exists(Path.Combine(aside, "theirs.txt")) && tj.conflicts.Contains(aside));
+            T("...and the note says so", JournalApplier.LastNote.Contains("_AMPconflict_A_"));
+        }
+
+        // Keep: an installed mod has the name (different case) of a disabled one
+        using(var g = new TestFolders()) {
+            g.Mod("Same");
+            var kj = new SwapJournal { mode = SwapMode.Keep };
+            kj.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "Same" });
+            string c = Path.Combine(g.Root, "c"), jd = Path.Combine(g.Root, "j");
+            JournalApplier.Apply(kj, g.Mods, c, jd);
+            g.File_(g.Mod("same"), "host.txt", "host");
+            T("keep restore with a same-named installed mod keeps both", JournalApplier.Restore(kj, g.Mods, c, jd)
+                && Directory.GetDirectories(g.Mods, "_AMPconflict_*").Length == 1 && Directory.Exists(Path.Combine(g.Mods, "Same")));
+        }
+
+        // Early failure: a name is taken, nothing has moved
+        using(var g = new TestFolders()) {
+            g.Mod("A"); g.Mod("B"); g.Mod("_AMPoff_B");
+            var pj = new SwapJournal { mode = SwapMode.Temporary };
+            pj.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "A" });
+            pj.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "B" });
+            T("a taken name fails before anything moves", !JournalApplier.Apply(pj, g.Mods, Path.Combine(g.Root, "c"), Path.Combine(g.Root, "j"))
+                && Directory.Exists(Path.Combine(g.Mods, "A")) && pj.lastError.Contains("_AMPoff_B") && pj.state == SwapState.Restored && !pj.ops.Any(o => o.done || o.started));
+        }
+
+        // Journal file: atomic save, leftover temp file, lock
+        using(var g = new TestFolders()) {
+            string path = Path.Combine(g.Root, "j", "session.json");
+            var sj = new SwapJournal { mode = SwapMode.Keep, host = "h" };
+            sj.SaveTo(path);
+            sj.host = "h2";
+            sj.SaveTo(path);
+            T("journal saves and loads", SwapJournal.LoadFrom(path).host == "h2" && !File.Exists(path + ".tmp"));
+            File.WriteAllText(path + ".tmp", sj.ToJson());
+            File.WriteAllText(path, "{garbage");
+            T("an unreadable journal falls back to the temp file", SwapJournal.LoadFrom(path) != null && SwapJournal.LoadFrom(path).host == "h2");
+
+            File.WriteAllText(path, new SwapJournal().ToJson());
+            string lockPath = Path.Combine(g.Root, "j", "session.lock");
+            using(new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)) {
+                T("a second helper gets busy", JournalApplier.RunFromHelper(path, g.Mods, Path.Combine(g.Root, "c"), "apply") == "busy");
+            }
+            T("without the lock it runs", JournalApplier.RunFromHelper(path, g.Mods, Path.Combine(g.Root, "c"), "apply") == "");
+            T("...and wrote the journal", SwapJournal.LoadFrom(path).state == SwapState.Applied);
+        }
+
+        // Quoting: a Mods folder with a trailing backslash must not swallow the closing quote
+        string args = HelperScript.LauncherArguments("C:\\x y\\h.ps1", 1, "C:\\x y\\AMP.dll", "C:\\x y\\N.dll", "C:\\x y\\session.json", "C:\\x y\\Mods\\", "C:\\x y\\Cache/", "apply", false, "C:\\x y\\h.log");
+        string decoded = System.Text.Encoding.Unicode.GetString(Convert.FromBase64String(args.Substring(args.LastIndexOf(' ') + 1)));
+        T("trailing separators are trimmed in the helper command", decoded.Contains("-Mods \"C:\\x y\\Mods\" -Cache \"C:\\x y\\Cache\" -Action apply") && decoded.Contains("exit ([int]$r.ReturnValue)"));
     }
 
     private static void HelperTests() {
@@ -370,8 +472,9 @@ internal static class Program {
             // Wait on a short-lived dummy process instead of the game
             var dummy = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c ping -n 2 127.0.0.1 >nul") { CreateNoWindow = true, UseShellExecute = false });
             var launcher = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ps,
-                HelperScript.LauncherArguments(script, dummy.Id, ampDll, jsonDll, journalPath, f.Mods, cache, "apply", false, log)) { CreateNoWindow = true, UseShellExecute = false });
+                HelperScript.LauncherArguments(script, dummy.Id, ampDll, jsonDll, journalPath, f.Mods + "\\", cache + "\\", "apply", false, log)) { CreateNoWindow = true, UseShellExecute = false });
             launcher.WaitForExit(30000);
+            T("launcher exits 0 when Windows created the helper", launcher.HasExited && launcher.ExitCode == 0);
 
             DateTime until = DateTime.UtcNow.AddSeconds(60);
             while(DateTime.UtcNow < until) {
@@ -383,6 +486,28 @@ internal static class Program {
 
             T("helper ran through WMI and applied the journal", Directory.Exists(Path.Combine(f.Mods, "_AMPoff_Extra")));
             T("helper wrote the updated journal", SwapJournal.FromJson(File.ReadAllText(journalPath)).state == SwapState.Applied);
+        }
+
+        // The helper must also load the REAL built mod DLLs under Windows PowerShell 5.1
+        string realAmp = @"C:\Projects\bns-mp\build\AMP.dll", realJson = @"C:\Projects\bns-mp\build\Newtonsoft.Json.dll";
+        if(File.Exists(realAmp) && File.Exists(realJson)) {
+            using(var f = new TestFolders()) {
+                f.Mod("Extra");
+                string journalPath = Path.Combine(f.Root, "journal", "session.json");
+                var j = new SwapJournal { mode = SwapMode.Temporary };
+                j.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "Extra" });
+                j.SaveTo(journalPath);
+                string script = Path.Combine(f.Root, "helper.ps1"), log = Path.Combine(f.Root, "helper.log");
+                File.WriteAllText(script, HelperScript.Script());
+                var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ps,
+                    "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" -GamePid 0 -AmpDll \"" + realAmp + "\" -JsonDll \"" + realJson + "\" -Journal \"" + journalPath
+                    + "\" -Mods \"" + f.Mods + "\" -Cache \"" + Path.Combine(f.Root, "cache") + "\" -Action apply -Relaunch 0 -Log \"" + log + "\"") { CreateNoWindow = true, UseShellExecute = false });
+                p.WaitForExit(60000);
+                string logText = File.Exists(log) ? File.ReadAllText(log) : "(no log)";
+                T("helper loads the real built AMP.dll and applies (" + logText.Trim().Replace("\r\n", " | ") + ")", Directory.Exists(Path.Combine(f.Mods, "_AMPoff_Extra")) && logText.Contains("done"));
+            }
+        } else {
+            T("real built DLLs not found (skipped)", true);
         }
     }
 

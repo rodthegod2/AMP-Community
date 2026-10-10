@@ -20,7 +20,8 @@ namespace AMP.ModSync {
 
             string mods = FileManager.GetFullPath(FileManager.Type.JSONCatalog, FileManager.Source.Mods);
             if(string.IsNullOrEmpty(mods)) throw new InvalidOperationException("the Mods folder path is empty");
-            DirectoryInfo parent = Directory.GetParent(mods.TrimEnd('/', '\\'));
+            mods = Path.GetFullPath(mods.TrimEnd('/', '\\')); // backslashes, no trailing separator: the helper gets these as command line arguments
+            DirectoryInfo parent = Directory.GetParent(mods);
             if(parent == null) throw new InvalidOperationException("the Mods folder has no parent folder");
 
             CacheFolder = Path.Combine(parent.FullName, "AMP_ModCache");

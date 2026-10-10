@@ -1267,7 +1267,8 @@ namespace AMP.UI {
             modSyncModeToggle.SetActive(false);
 
             restoreModsButton = CreateModSyncButton(transform, "RestoreMods", "Restore my mods", Vector3.zero, new Vector2(450, 100), 40, Color.black, () => {
-                ModSync.ModSwapClient.RestoreNow();
+                ModSync.ModSwapClient.RestoreNow(); // after two failed restores this is "Forget swap" (second click confirms)
+                restoreModsButton.GetComponentInChildren<TextMeshProUGUI>().text = ModSync.ModSwapClient.RestoreButtonLabel;
             });
             restoreModsButton.SetActive(false);
             #endif
@@ -1598,6 +1599,7 @@ namespace AMP.UI {
             bool showRestore = ModSync.ModSwapClient.CanRestore && (page == Page.Disconnect || page == Page.Serverlist);
             restoreModsButton.SetActive(showRestore);
             if(showRestore) {
+                restoreModsButton.GetComponentInChildren<TextMeshProUGUI>().text = ModSync.ModSwapClient.RestoreButtonLabel;
                 RectTransform restoreRect = restoreModsButton.GetComponent<RectTransform>();
                 restoreRect.sizeDelta = page == Page.Disconnect ? new Vector2(200, 150) : new Vector2(450, 100);
                 restoreRect.localPosition = page == Page.Disconnect ? new Vector3(-360, -260, 0) : new Vector3(320, -330, 0);

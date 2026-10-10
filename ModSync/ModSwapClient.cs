@@ -102,15 +102,32 @@ namespace AMP.ModSync {
             planned.rejoinPending = isIp && port > 0; // a Steam lobby can't be rejoined by address: the player joins again by hand
             Save(planned);
 
-            Progress("Closing the game to install the mods...\nIt reopens and reconnects by itself.");
-            LaunchHelper("apply", true);
-            ModManager.instance.StartCoroutine(QuitSoon());
+            Progress("Starting the helper...");
+            Process launcher = LaunchHelper("apply", true);
+            ModManager.instance.StartCoroutine(QuitWhenHelperStarted(launcher, () => {
+                DropPlannedJournal();
+                Fail(HelperNotStarted);
+            }));
         }
 
-        // The launcher asks WMI to create the helper; give that a moment before the game process goes away
-        private static IEnumerator QuitSoon() {
-            yield return new WaitForSecondsRealtime(1f);
-            Application.Quit();
+        private const string HelperNotStarted = "Couldn't start the helper (blocked by security software?). Nothing was changed.";
+
+        // The launcher is a short-lived powershell that asks WMI to create the helper and exits with 0 once Windows has done so.
+        // Only then is it safe to close the game: the helper waits for it and takes over.
+        private static IEnumerator QuitWhenHelperStarted(Process launcher, Action onFailed) {
+            float waited = 0f;
+            while(launcher != null && !launcher.HasExited && waited < 10f) {
+                yield return new WaitForSecondsRealtime(0.2f);
+                waited += 0.2f;
+            }
+            if(launcher != null && launcher.HasExited && launcher.ExitCode == 0) {
+                Progress("Closing the game to install the mods...\nIt reopens and reconnects by itself.");
+                Application.Quit();
+                yield break;
+            }
+            Log.Err(Defines.CLIENT, "Mod swap: the helper launcher " + (launcher != null && launcher.HasExited ? "exited with code " + launcher.ExitCode : "didn't finish in 10 s"));
+            try { if(launcher != null && !launcher.HasExited) launcher.Kill(); } catch(Exception) { }
+            onFailed();
         }
 
         private static void Progress(string text) {
@@ -143,6 +160,12 @@ namespace AMP.ModSync {
             ReportHelperLog();
             if(journal == null) return;
 
+            // The helper may have died halfway: "Planned" with a touched op is not "nothing happened"
+            if(journal.state == SwapState.Planned && journal.ops.Any(o => o.done || o.started)) {
+                journal.state = SwapState.RestorePending;
+                Save(journal);
+            }
+
             switch(journal.state) {
                 case SwapState.Planned:   // the helper never ran
                 case SwapState.Restored:  // done, nothing to remember
@@ -150,7 +173,9 @@ namespace AMP.ModSync {
                     break;
 
                 case SwapState.RestorePending:
-                    Notice("Your mods couldn't be restored automatically.\nBook > Mods > AMP > Restore my mods.");
+                    Notice(CanForget
+                        ? "Your mods couldn't be restored automatically, twice.\nBook > Mods > AMP > Forget swap leaves the folders where they are."
+                        : "Your mods couldn't be restored automatically.\nBook > Mods > AMP > Restore my mods.");
                     break;
 
                 case SwapState.Applied:
@@ -167,31 +192,100 @@ namespace AMP.ModSync {
         // Application.quitting: an applied swap (Temporary or Keep) is undone once the game has closed
         internal static void OnQuit() {
             try {
-                if(journal == null || journal.state != SwapState.Applied) return;
+                // The file is the truth (a helper may have changed it since this game started), never a stale in-memory copy
+                journal = Load();
+                if(journal == null || (journal.state != SwapState.Applied && journal.state != SwapState.RestorePending)) return;
                 journal.state = SwapState.RestorePending;
                 Save(journal);
                 // Temporary puts everything back; Keep only re-enables what was disabled and restores the load order
                 Process launcher = LaunchHelper("restore", false);
-                if(launcher != null) launcher.WaitForExit(5000); // once it exits, the WMI-created helper lives on without the game
+                if(launcher != null) {
+                    bool exited = launcher.WaitForExit(5000); // once it exits with 0, the WMI-created helper lives on without the game
+                    Debug.Log("[AMP] Mod swap: restore launcher " + (exited ? "exited with code " + launcher.ExitCode : "didn't finish in 5 s"));
+                }
             } catch(Exception e) {
                 Debug.Log("[AMP] Mod swap: couldn't start the restore helper on quit. " + e.Message); // state is RestorePending: the next start offers the button
             }
         }
 
         internal static void RestoreNow() {
-            if(busy || !CanRestore) return;
+            if(busy) return;
+            if(CanForget) { ForgetSwap(); return; }
             busy = true;
+            SwapState before = SwapState.Applied;
             try {
+                journal = Load(); // never save a stale in-memory copy over what the helper wrote
+                if(!CanRestore) { busy = false; return; }
+                before = journal.state;
                 journal.state = SwapState.RestorePending;
                 Save(journal);
-                Notice("Closing the game to restore your mods.\nIt reopens by itself.");
-                LaunchHelper("restore", true);
-                ModManager.instance.StartCoroutine(QuitSoon());
+                Notice("Starting the helper to restore your mods...");
+                Process launcher = LaunchHelper("restore", true);
+                ModManager.instance.StartCoroutine(QuitWhenHelperStarted(launcher, () => {
+                    RestoreState(before);
+                    busy = false;
+                    Notice(HelperNotStarted);
+                }));
             } catch(Exception e) {
                 busy = false;
+                RestoreState(before);
                 Log.Err(Defines.CLIENT, "Mod swap: couldn't start the restore. " + e);
-                Notice("Couldn't start the restore: " + e.Message);
+                Notice("Couldn't start the restore: " + e.Message + "\nNothing was changed.");
             }
+        }
+
+        // The restore didn't start: the journal goes back to what it said
+        private static void RestoreState(SwapState before) {
+            try {
+                journal = Load();
+                if(journal != null && journal.state == SwapState.RestorePending) {
+                    journal.state = before;
+                    Save(journal);
+                }
+            } catch(Exception e) {
+                Log.Err(Defines.CLIENT, "Mod swap: couldn't reset the journal. " + e.Message);
+            }
+        }
+
+        // After two restores that didn't finish: "Forget swap" (second click confirms). The folders stay where they are, the notice says where.
+        internal static bool CanForget { get { return journal != null && journal.restoreFailures >= 2 && journal.state == SwapState.RestorePending; } }
+
+        internal static string RestoreButtonLabel {
+            get { return !CanForget ? "Restore my mods" : (Time.realtimeSinceStartup < forgetArmedUntil ? "Click again to forget" : "Forget swap"); }
+        }
+
+        private static float forgetArmedUntil;
+
+        internal static void ForgetSwap() {
+            if(!CanForget) return;
+            string where = LeftoverFolders();
+            if(Time.realtimeSinceStartup >= forgetArmedUntil) {
+                forgetArmedUntil = Time.realtimeSinceStartup + 10f;
+                Notice("Forgetting this swap leaves your folders where they are:\n" + where + "\nClick again within 10 s to confirm.");
+                return;
+            }
+            forgetArmedUntil = 0f;
+            DeleteJournal();
+            Notice("Swap forgotten. Folders left in place:\n" + where);
+        }
+
+        // Where a stuck swap left things, so the player can move them back by hand
+        private static string LeftoverFolders() {
+            var found = new List<string>();
+            try {
+                foreach(string dir in Directory.GetDirectories(ModSyncPaths.ModsFolder)) {
+                    string name = Path.GetFileName(dir);
+                    if(name.StartsWith(JournalApplier.OffPrefix) || name.StartsWith(JournalApplier.OldPrefix) || name.StartsWith(JournalApplier.ConflictPrefix)) found.Add(name + " (in Mods)");
+                }
+                if(journal != null) {
+                    string old = JournalApplier.OldFolder(ModSyncPaths.CacheFolder, journal);
+                    if(Directory.Exists(old)) found.Add(old);
+                    found.AddRange(journal.conflicts.Where(c => !c.StartsWith(ModSyncPaths.ModsFolder, StringComparison.OrdinalIgnoreCase)));
+                }
+            } catch(Exception e) {
+                Log.Warn(Defines.CLIENT, "Mod swap: couldn't list the leftover folders. " + e.Message);
+            }
+            return found.Count == 0 ? "(none found)" : string.Join("\n", found);
         }
 
         private static IEnumerator RejoinRoutine(string host, int port, string password) {
@@ -237,12 +331,12 @@ namespace AMP.ModSync {
                 List<string> lines = File.ReadAllLines(log).Where(l => l.Trim().Length > 0).ToList();
                 File.Delete(log);
                 int start = lines.FindLastIndex(l => l.Contains("helper start"));
-                string problem = lines.Skip(Math.Max(start, 0)).LastOrDefault(l => {
-                    int space = l.IndexOf(' ');
-                    string text = space >= 0 ? l.Substring(space + 1) : l;
-                    return text.StartsWith("failed") || text.StartsWith("error");
-                });
-                if(problem != null) Notice("The mod swap didn't work:\n" + problem.Substring(problem.IndexOf(' ') + 1));
+                Func<string, string> text = l => { int space = l.IndexOf(' '); return space >= 0 ? l.Substring(space + 1) : l; };
+                List<string> run = lines.Skip(Math.Max(start, 0)).Select(text).ToList();
+                string problem = run.LastOrDefault(t => t.StartsWith("failed") || t.StartsWith("error"));
+                string note = run.LastOrDefault(t => t.StartsWith("note:"));
+                if(problem != null) Notice("The mod swap didn't work:\n" + problem);
+                if(note != null) Notice(note.Substring(5).Trim());
             } catch(Exception e) {
                 Log.Warn(Defines.CLIENT, "Mod swap: couldn't read the helper log. " + e.Message);
             }
@@ -302,26 +396,21 @@ namespace AMP.ModSync {
         }
 
         private static SwapJournal Load() {
-            try {
-                return File.Exists(JournalPath) ? SwapJournal.FromJson(File.ReadAllText(JournalPath)) : null;
-            } catch(Exception e) {
-                Log.Err(Defines.CLIENT, "Mod swap: couldn't read the journal. " + e.Message);
-                return null;
-            }
+            return SwapJournal.LoadFrom(JournalPath); // also uses a leftover .tmp file when the real one is unreadable
         }
 
-        // Written to a side file first so a crash can't leave half a journal
         private static void Save(SwapJournal toSave) {
-            Directory.CreateDirectory(ModSyncPaths.CacheFolder);
-            string temp = JournalPath + ".tmp";
-            File.WriteAllText(temp, toSave.ToJson());
-            if(File.Exists(JournalPath)) File.Replace(temp, JournalPath, null);
-            else File.Move(temp, JournalPath);
+            toSave.SaveTo(JournalPath);
             journal = toSave;
         }
 
         private static void DeleteJournal() {
-            try { File.Delete(JournalPath); } catch(Exception e) { Log.Warn(Defines.CLIENT, "Mod swap: couldn't delete the journal. " + e.Message); }
+            try {
+                File.Delete(JournalPath);
+                File.Delete(JournalPath + ".tmp");
+            } catch(Exception e) {
+                Log.Warn(Defines.CLIENT, "Mod swap: couldn't delete the journal. " + e.Message);
+            }
             journal = null;
         }
 

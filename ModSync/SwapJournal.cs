@@ -2,6 +2,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace AMP.ModSync {
     public enum SwapMode  { Temporary, Keep }
@@ -14,6 +15,7 @@ namespace AMP.ModSync {
         public SwapOpKind kind;
         public string folder = "";
         public string hash   = "";   // Install: cache entry
+        public bool   started;       // set (and saved) just before the change, so a crash in between can still be undone
         public bool   done;          // set by the applier once the change is on disk
     }
 
@@ -30,8 +32,34 @@ namespace AMP.ModSync {
         public bool     hadLoadOrder;           // there was a loadorder.json before the swap
         public List<SwapOp> ops = new List<SwapOp>();
         public string   lastError = "";
+        public int      restoreFailures;        // restores that didn't finish; after two the player may forget the swap
+        public List<string> conflicts = new List<string>(); // folders moved aside because they were in the way (never deleted)
 
         public string ToJson() { return JsonConvert.SerializeObject(this, Formatting.Indented); }
+
+        // Written to a side file first and swapped in, so a crash never leaves half a journal
+        public void SaveTo(string path) {
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            string temp = path + ".tmp";
+            File.WriteAllText(temp, ToJson());
+            if(File.Exists(path)) File.Replace(temp, path, null);
+            else File.Move(temp, path);
+        }
+
+        // The side file is only used when the real one is unreadable (a crash between writing and swapping)
+        public static SwapJournal LoadFrom(string path) {
+            return TryRead(path) ?? TryRead(path + ".tmp");
+        }
+
+        private static SwapJournal TryRead(string path) {
+            try {
+                return File.Exists(path) ? FromJson(File.ReadAllText(path)) : null;
+            } catch(IOException) {
+                return null;
+            } catch(System.UnauthorizedAccessException) {
+                return null;
+            }
+        }
 
         public static SwapJournal FromJson(string json) {
             try {
