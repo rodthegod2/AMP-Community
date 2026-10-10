@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using AMP.ModSync;
 
@@ -25,6 +26,7 @@ internal static class Program {
         HelperTests();
         ProfileTests();
         ReleaseInfoTests();
+        ReleasePackageTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -853,5 +855,57 @@ internal static class Program {
             && ReleaseInfo.IsTrustedUrl("https://objects.githubusercontent.com/x") && ReleaseInfo.IsTrustedUrl("https://release-assets.githubusercontent.com/x"));
         T("http or lookalike urls are not trusted", !ReleaseInfo.IsTrustedUrl("http://github.com/x") && !ReleaseInfo.IsTrustedUrl("https://github.com.evil.com/x")
             && !ReleaseInfo.IsTrustedUrl("https://evil.com/github.com") && !ReleaseInfo.IsTrustedUrl("https://github.com@evil.com/x") && !ReleaseInfo.IsTrustedUrl(null));
+    }
+
+    // Pairs of entry name and text
+    private static string MakeZip(TestFolders f, string name, params string[] pairs) {
+        string path = Path.Combine(f.Root, name);
+        using(var zip = new ZipArchive(File.Create(path), ZipArchiveMode.Create)) {
+            for(int i = 0; i < pairs.Length; i += 2) {
+                using(var writer = new StreamWriter(zip.CreateEntry(pairs[i]).Open())) writer.Write(pairs[i + 1]);
+            }
+        }
+        return path;
+    }
+
+    private static string Staging(TestFolders f) { return Path.Combine(f.Root, "staging-" + Guid.NewGuid().ToString("N")); }
+
+    private static bool Rejects(Func<string> extract) {
+        try {
+            extract();
+            return false;
+        } catch(InvalidDataException) {
+            return true;
+        }
+    }
+
+    private static void ReleasePackageTests() {
+        using(var f = new TestFolders()) {
+            const long max = 1 << 20;
+            string good = MakeZip(f, "good.zip", "MultiplayerMod/AMP.dll", "dll", "MultiplayerMod/manifest.json", "{}", "HOW-TO-PLAY.txt", "hi");
+            string staging = Staging(f);
+            string amp = ReleasePackage.ExtractAmpFolder(good, staging, max);
+            T("valid package gives the AMP folder", amp != null && File.Exists(Path.Combine(amp, "AMP.dll")) && Path.GetFileName(amp) == "MultiplayerMod");
+            T("the folder is inside the staging root", amp != null && Path.GetDirectoryName(Path.GetDirectoryName(amp)) == staging);
+
+            string evil = MakeZip(f, "evil.zip", "MultiplayerMod/AMP.dll", "dll", "MultiplayerMod/manifest.json", "{}", "../evil.dll", "x");
+            string evilStaging = Staging(f);
+            T("a zip-slip entry rejects the whole package", Rejects(() => ReleasePackage.ExtractAmpFolder(evil, evilStaging, max)));
+            T("...and nothing is extracted", !Directory.Exists(evilStaging) && !File.Exists(Path.Combine(f.Root, "evil.dll")));
+
+            string big = MakeZip(f, "big.zip", "MultiplayerMod/AMP.dll", new string('x', 100), "MultiplayerMod/manifest.json", "{}");
+            T("a package over the size limit is rejected", Rejects(() => ReleasePackage.ExtractAmpFolder(big, Staging(f), 50)));
+
+            string noDll = MakeZip(f, "nodll.zip", "MultiplayerMod/manifest.json", "{}");
+            string noDllStaging = Staging(f);
+            T("a package without AMP.dll is rejected", Rejects(() => ReleasePackage.ExtractAmpFolder(noDll, noDllStaging, max)));
+            T("...and the partial extraction is removed", !Directory.Exists(noDllStaging) || Directory.GetDirectories(noDllStaging).Length == 0);
+
+            string two = MakeZip(f, "two.zip", "A/AMP.dll", "x", "A/manifest.json", "{}", "B/AMP.dll", "x", "B/manifest.json", "{}");
+            T("two AMP folders are rejected", Rejects(() => ReleasePackage.ExtractAmpFolder(two, Staging(f), max)));
+
+            string many = MakeZip(f, "many.zip", Enumerable.Range(0, 10001).SelectMany(i => new[] { "f" + i + ".txt", "" }).ToArray());
+            T("more than 10,000 files is rejected", Rejects(() => ReleasePackage.ExtractAmpFolder(many, Staging(f), max)));
+        }
     }
 }

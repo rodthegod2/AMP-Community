@@ -28,6 +28,10 @@
     <Compile Include="..\..\ModSync\HelperScript.cs" />
     <Compile Include="..\..\ModSync\ProfileSeeder.cs" />
     <Compile Include="..\..\ModSync\ReleaseInfo.cs" />
+    <Compile Include="..\..\ModSync\ReleasePackage.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.IO.Compression" />
   </ItemGroup>
   <ItemGroup>
     <!-- The game's copy fails .NET Framework strong-name validation when loaded outside Unity, so use the signed package -->

@@ -78,6 +78,7 @@
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="System.Data" />
+    <Reference Include="System.IO.Compression" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Xml" />
     <Reference Include="ThunderRoad">
@@ -264,6 +265,7 @@
     <Compile Include="ModSync\ProfileSeeder.cs" />
     <Compile Include="ModSync\ProfileSwitch.cs" />
     <Compile Include="ModSync\ReleaseInfo.cs" />
+    <Compile Include="ModSync\ReleasePackage.cs" />
     <Compile Include="Network\Packets\Implementation\ItemSpawnPacket.cs" />
     <Compile Include="Network\Packets\Implementation\LevelChangePacket.cs" />
     <Compile Include="Network\Packets\Implementation\CreatureSpawnPacket.cs" />
