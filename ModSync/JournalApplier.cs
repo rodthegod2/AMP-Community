@@ -23,8 +23,9 @@ namespace AMP.ModSync {
                 return true;
             } catch(Exception e) {
                 journal.lastError = e.Message;
-                Undo(journal, modsFolder, cacheRoot, journalDir, true); // roll back whatever was done
-                journal.state = SwapState.Restored;
+                // Back to normal only if the rollback fully worked; otherwise startup must offer "Restore my mods"
+                bool rolledBack = Undo(journal, modsFolder, cacheRoot, journalDir, true);
+                journal.state = rolledBack ? SwapState.Restored : SwapState.RestorePending;
                 return false;
             }
         }

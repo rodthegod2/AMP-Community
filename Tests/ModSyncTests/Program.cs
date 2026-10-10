@@ -329,6 +329,16 @@ internal static class Program {
                 T("...and rolls back the disable", Directory.Exists(Path.Combine(g.Mods, "A")) && bad.state == SwapState.Restored && bad.lastError.Length > 0);
             }
 
+            // Rollback that can't finish must not claim "Restored"
+            using(var g = new TestFolders()) {
+                g.Mod("A");
+                var stuck = new SwapJournal { mode = SwapMode.Temporary };
+                stuck.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "A", done = true }); // claims A is disabled, but _AMPoff_A doesn't exist: undo is impossible
+                stuck.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = "B", hash = new string('c', 64) }); // not in cache
+                T("apply fails when a later op can't run", !JournalApplier.Apply(stuck, g.Mods, Path.Combine(g.Root, "cache"), Path.Combine(g.Root, "j")));
+                T("...and a failed rollback leaves RestorePending", stuck.state == SwapState.RestorePending);
+            }
+
             using(var g = new TestFolders()) {
                 var evil = new SwapJournal();
                 evil.ops.Add(new SwapOp { kind = SwapOpKind.Disable, folder = "..\\x" });
@@ -364,7 +374,12 @@ internal static class Program {
             launcher.WaitForExit(30000);
 
             DateTime until = DateTime.UtcNow.AddSeconds(60);
-            while(DateTime.UtcNow < until && !(File.Exists(log) && File.ReadAllText(log).Contains("done") || File.Exists(log) && File.ReadAllText(log).Contains("fail"))) System.Threading.Thread.Sleep(500);
+            while(DateTime.UtcNow < until) {
+                string text = "";
+                try { if(File.Exists(log)) text = File.ReadAllText(log); } catch(IOException) { } // PowerShell may be appending right now
+                if(text.Contains("done") || text.Contains("fail")) break;
+                System.Threading.Thread.Sleep(500);
+            }
 
             T("helper ran through WMI and applied the journal", Directory.Exists(Path.Combine(f.Mods, "_AMPoff_Extra")));
             T("helper wrote the updated journal", SwapJournal.FromJson(File.ReadAllText(journalPath)).state == SwapState.Applied);
