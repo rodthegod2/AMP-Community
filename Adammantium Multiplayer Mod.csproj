@@ -245,6 +245,8 @@
     <Compile Include="ModSync\MessageChunks.cs" />
     <Compile Include="ModSync\SettingsRules.cs" />
     <Compile Include="ModSync\TransferRules.cs" />
+    <Compile Include="ModSync\TransferSender.cs" />
+    <Compile Include="ModSync\TransferReceiver.cs" />
     <Compile Include="ModSync\ModSyncClient.cs" />
     <Compile Include="ModSync\ModSyncHost.cs" />
     <Compile Include="ModSync\ModSyncPaths.cs" />

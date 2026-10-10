@@ -19,6 +19,8 @@
     <Compile Include="..\..\ModSync\MessageChunks.cs" />
     <Compile Include="..\..\ModSync\SettingsRules.cs" />
     <Compile Include="..\..\ModSync\TransferRules.cs" />
+    <Compile Include="..\..\ModSync\TransferSender.cs" />
+    <Compile Include="..\..\ModSync\TransferReceiver.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- The game's copy fails .NET Framework strong-name validation when loaded outside Unity, so use the signed package -->

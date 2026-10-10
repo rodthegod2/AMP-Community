@@ -17,6 +17,7 @@ internal static class Program {
         ChunkTests();
         SettingsTests();
         TransferRulesTests();
+        TransferLoopTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -41,6 +42,67 @@ internal static class Program {
             var files = TransferRules.ListTransferFiles(mod);
             T("transfer list has the hashed files only", files.Select(x => x.path).OrderBy(p => p).SequenceEqual(new[] { "Items/sword.json", "manifest.json" }));
             T("transfer list has sizes", files.All(x => x.size > 0));
+        }
+    }
+
+    // Runs a real sender thread against a receiver, acks flowing back like over the network
+    private static bool Loop(TestFolders f, string source, TransferManifest manifest, int window, out string target, Func<int, bool> dropAck = null) {
+        target = Path.Combine(f.Root, "staging-" + Guid.NewGuid().ToString("N"));
+        var receiver = TransferReceiver.Start(manifest, target, long.MaxValue);
+        TransferSender sender = null;
+        int chunkNo = 0;
+        sender = new TransferSender(manifest, source, window, 0, (file, offset, data) => {
+            if(receiver.OnChunk(file, offset, data) && (dropAck == null || !dropAck(chunkNo++))) sender.Ack();
+        }) { AckTimeoutMs = 500 };
+        bool ok = sender.Run();
+        receiver.Dispose();
+        return ok && receiver.Complete;
+    }
+
+    private static void TransferLoopTests() {
+        using(var f = new TestFolders()) {
+            string mod = f.Mod("Big");
+            var rng = new Random(7);
+            byte[] big = new byte[TransferSender.ChunkSize * 3 + 123];
+            rng.NextBytes(big);
+            File.WriteAllBytes(Path.Combine(mod, "assets.bundle"), big);
+            f.File_(mod, "Items/empty.json", "");
+            var manifest = new TransferManifest { transferId = 1, folder = "Big", files = TransferRules.ListTransferFiles(mod) };
+
+            string target;
+            T("multi-chunk transfer completes", Loop(f, mod, manifest, 4, out target));
+            T("bytes are identical", File.ReadAllBytes(Path.Combine(target, "assets.bundle")).SequenceEqual(big));
+            T("empty files are created", File.Exists(Path.Combine(target, "Items", "empty.json")) && new FileInfo(Path.Combine(target, "Items", "empty.json")).Length == 0);
+            T("window of 1 still completes", Loop(f, mod, manifest, 1, out target));
+            T("missing acks time out instead of hanging", !Loop(f, mod, manifest, 2, out target, n => n >= 1));
+
+            var receiver = TransferReceiver.Start(manifest, Path.Combine(f.Root, "r2"), long.MaxValue);
+            T("chunk for unknown file is refused", !receiver.OnChunk(99, 0, new byte[1]));
+            T("out-of-order chunk is refused", !receiver.OnChunk(0, 5, new byte[1]));
+            T("chunk past the file size is refused", !receiver.OnChunk(0, 0, new byte[1]));
+            receiver.Dispose();
+
+            bool threw = false;
+            try { TransferReceiver.Start(new TransferManifest { files = { new TransferFile { path = "../x.dll", size = 1 } } }, Path.Combine(f.Root, "r3"), long.MaxValue); }
+            catch(InvalidDataException) { threw = true; }
+            T("unsafe path in manifest is refused", threw);
+
+            threw = false;
+            try { TransferReceiver.Start(manifest, Path.Combine(f.Root, "r4"), 10); }
+            catch(InvalidDataException) { threw = true; }
+            T("manifest over the size limit is refused", threw);
+
+            var done = TransferReceiver.Start(new TransferManifest { files = { new TransferFile { path = "e.json", size = 0 } } }, Path.Combine(f.Root, "r5"), long.MaxValue);
+            T("empty file is created by its single empty chunk", done.OnChunk(0, 0, new byte[0]) && done.Complete);
+            T("repeated chunk after completion is refused", !done.OnChunk(0, 0, new byte[0]));
+            done.Dispose();
+
+            var cancelSender = new TransferSender(manifest, mod, 1, 0, (a, b, c) => { }) { AckTimeoutMs = 5000 };
+            var thread = new System.Threading.Thread(() => cancelSender.Run());
+            thread.Start();
+            System.Threading.Thread.Sleep(100);
+            cancelSender.Cancel();
+            T("cancel stops a waiting sender quickly", thread.Join(2000));
         }
     }
 
