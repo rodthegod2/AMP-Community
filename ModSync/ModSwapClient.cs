@@ -164,13 +164,15 @@ namespace AMP.ModSync {
             }
         }
 
-        // Application.quitting: a Temporary swap puts the player's mods back once the game has closed
+        // Application.quitting: an applied swap (Temporary or Keep) is undone once the game has closed
         internal static void OnQuit() {
             try {
-                if(journal == null || journal.state != SwapState.Applied || journal.mode != SwapMode.Temporary) return;
+                if(journal == null || journal.state != SwapState.Applied) return;
                 journal.state = SwapState.RestorePending;
                 Save(journal);
-                LaunchHelper("restore", false);
+                // Temporary puts everything back; Keep only re-enables what was disabled and restores the load order
+                Process launcher = LaunchHelper("restore", false);
+                if(launcher != null) launcher.WaitForExit(5000); // once it exits, the WMI-created helper lives on without the game
             } catch(Exception e) {
                 Debug.Log("[AMP] Mod swap: couldn't start the restore helper on quit. " + e.Message); // state is RestorePending: the next start offers the button
             }
@@ -251,7 +253,7 @@ namespace AMP.ModSync {
         #region Helper and journal files
 
         // Starts a short-lived powershell that asks WMI to create the real helper (outside the game's process tree)
-        private static void LaunchHelper(string action, bool relaunch) {
+        private static Process LaunchHelper(string action, bool relaunch) {
             string ampFolder = FindAmpFolder();
             if(ampFolder == null) throw new FileNotFoundException("AMP's own mod folder wasn't found.");
             string ampDll = Path.Combine(ampFolder, "AMP.dll");
@@ -275,7 +277,7 @@ namespace AMP.ModSync {
             string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
             string arguments = HelperScript.LauncherArguments(script, Process.GetCurrentProcess().Id, ampCopy, jsonCopy, JournalPath,
                                                               ModSyncPaths.ModsFolder, ModSyncPaths.CacheFolder, action, relaunch, Path.Combine(HelperFolder, "helper.log"));
-            Process.Start(new ProcessStartInfo(powershell, arguments) { UseShellExecute = false, CreateNoWindow = true });
+            return Process.Start(new ProcessStartInfo(powershell, arguments) { UseShellExecute = false, CreateNoWindow = true });
         }
 
         private static void CleanOldRuns(string keep) {
