@@ -10,6 +10,8 @@ namespace AmpBot {
         public int lingerSec = 3;          // stay connected/hosting this long after everything was seen
 
         // --join
+        public string platform = "windows"; // the platform the bot plans and reports as ("android": a Quest joiner)
+        public Dictionary<string, long> questIds = new Dictionary<string, long>(); // folder -> questModioId the host's mod list must carry
         public bool? planBlocks;           // the plan for the host's mods must (not) block joining
         public bool download;              // download what the plan adds/replaces, verify it in the bot's cache, then join anyway
         public List<string> downloaded = new List<string>();  // folders that must have been downloaded and verified
@@ -33,6 +35,7 @@ namespace AmpBot {
         // --host
         public string modSyncMode = ModSyncMode.Warn;
         public List<OptionValue> sendSnapshot = new List<OptionValue>();   // sent to every greeted joiner
+        public Dictionary<string, long> sendQuestIds = new Dictionary<string, long>(); // folder -> questModioId in the mod list (the host's Quest matches)
         public List<string> reports = new List<string>();     // JOINER_REPORT statuses that must arrive, in this order (checking excluded)
         public List<string> served = new List<string>();      // folders that must have been sent completely
         public List<string> notServed = new List<string>();   // folders the joiner must not ask for (it gets them from mod.io)

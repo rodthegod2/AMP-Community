@@ -154,6 +154,9 @@ namespace AMP.ModSync {
                 case "modioGetMod":         return ModioGetMod(step);
                 case "modioSearch":         return ModioSearch(step);
                 case "modioDownload":       return ModioDownload(step);
+                case "expectMatch":         return ExpectMatch(step);
+                case "expectUnavailable":   return ExpectUnavailable(step);
+                case "expectCachedModio":   return ExpectCachedModio(step);
                 case "quit":                return Nothing(); // the end of the script reports DONE and quits
                 default: throw new InvalidOperationException("unknown step " + step.Name);
             }
@@ -421,7 +424,7 @@ namespace AMP.ModSync {
             ModioClient.Search(step.Str("phrase"), (list, e) => { found = list; error = e; answered = true; });
             while(!answered) yield return Poll;
             if(error != null) { failure = "mod.io search failed: " + error; yield break; }
-            Debug.Log(Prefix + "INFO mod.io search \"" + step.Str("phrase") + "\": " + found.Count + " results: " + string.Join("; ", found.Take(5).Select(p => p.id.id + " " + p.name)));
+            Debug.Log(Prefix + "INFO mod.io search \"" + step.Str("phrase") + "\": " + found.Count + " results: " + string.Join("; ", found.Take(5).Select(p => p.id.id + " \"" + p.name + "\" by " + p.creator.username + " (" + ModioClient.PlatformAvailability(p) + ")")));
             if(!found.Any(p => p.id.id == step.Int("expectId"))) failure = "the search didn't find mod " + step.Int("expectId");
         }
 
@@ -453,6 +456,58 @@ namespace AMP.ModSync {
             else if(entry.modioFileId != download.fileId || entry.modioId != step.Int("id")) failure = "the cache entry doesn't record the mod.io ids";
         }
 
+        // Host: waits for the Quest matching of this hosting session, then checks one mod's result (what joiners get as questModioId)
+        private static IEnumerator ExpectMatch(AutopilotStep step) {
+            string folder = step.Str("folder");
+            long expected = step.Int("modioId");
+            bool confirm = step.Args.ContainsKey("confirm") && step.Bool("confirm");
+            if(ModManager.serverInstance == null) { failure = "not hosting"; yield break; }
+            while(!QuestMatcher.PassDone.IsCompleted && !(confirm && QuestMatcher.PendingFor(folder) != null)) yield return Poll;
+
+            if(confirm) {
+                QuestMatcher.Candidate candidate = QuestMatcher.PendingFor(folder);
+                if(candidate == null) { failure = "no Quest match of " + folder + " is waiting for the host's answer (sent as " + QuestMatcher.QuestIdFor(folder) + ")"; yield break; }
+                Debug.Log(Prefix + "INFO asking the host: " + candidate.modName + " -> mod.io " + candidate.modio.id + " \"" + candidate.modio.name + "\" by " + candidate.modio.author + "; answering Yes");
+                if(candidate.modio.id != expected) { failure = "the match to confirm is mod.io " + candidate.modio.id + ", expected " + expected; yield break; }
+                QuestMatcher.Answer(candidate, true);
+            }
+            ModMatch stored = QuestMatcher.StoredFor(folder);
+            long sent = QuestMatcher.QuestIdFor(folder);
+            Debug.Log(Prefix + "INFO Quest match of " + folder + ": " + (stored == null ? "nothing stored" : "mod.io " + stored.modioId + (stored.confirmed ? " (confirmed)" : "")) + ", joiners get questModioId " + sent);
+            if(expected > 0 ? sent != expected : sent != -1) failure = "joiners get questModioId " + sent + " for " + folder + ", expected " + (expected > 0 ? expected.ToString() : "-1 (no Quest version)");
+        }
+
+        private static IEnumerator ExpectUnavailable(AutopilotStep step) {
+            while(ModSyncClient.Plan == null) {
+                if(ModManager.clientInstance == null) { failure = "not connected, no mod plan will arrive"; yield break; }
+                yield return Poll;
+            }
+            if(!ModSyncClient.Plan.Of(SyncAction.Unavailable).Any(s => string.Equals(s.hostMod.folder, step.Str("folder"), StringComparison.OrdinalIgnoreCase)))
+                failure = step.Str("folder") + " isn't listed as unavailable: " + ModSyncClient.Plan.Describe().Replace("\r", "").Replace("\n", " | ");
+        }
+
+        // The cache entry of a mod downloaded from mod.io is the file mod.io has live for that platform (read from the mod's platform list)
+        private static IEnumerator ExpectCachedModio(AutopilotStep step) {
+            if(!ModSyncPaths.Available) { failure = "the mod cache folder is unknown"; yield break; }
+            string entries = Path.Combine(ModSyncPaths.CacheFolder, "mods");
+            CacheEntry entry = (Directory.Exists(entries) ? Directory.GetFiles(entries, "entry.json", SearchOption.AllDirectories) : new string[0])
+                .Select(f => { try { return Newtonsoft.Json.JsonConvert.DeserializeObject<CacheEntry>(File.ReadAllText(f)); } catch(Exception) { return null; } })
+                .FirstOrDefault(e => e != null && e.folder == step.Str("folder") && e.modioFileId > 0);
+            if(entry == null) { failure = "no cache entry from mod.io for " + step.Str("folder"); yield break; }
+
+            ModIO.ModProfile? profile = null;
+            string error = null;
+            bool answered = false;
+            ModioClient.GetMod(entry.modioId, (p, e) => { profile = p; error = e; answered = true; });
+            while(!answered) yield return Poll;
+            if(error != null) { failure = "mod.io GetMod failed: " + error; yield break; }
+            Debug.Log(Prefix + "INFO cached " + step.Str("folder") + " is mod.io " + entry.modioId + " file " + entry.modioFileId + "; mod.io: " + DescribeModio(profile.Value));
+            long live = (profile.Value.platforms ?? new ModIO.Implementation.API.Objects.ModPlatform[0])
+                .Where(p => string.Equals(p.platform, step.Str("platform"), StringComparison.OrdinalIgnoreCase)).Select(p => p.modfileLive).FirstOrDefault();
+            if(live <= 0) failure = "mod.io " + entry.modioId + " has no live file for " + step.Str("platform");
+            else if(live != entry.modioFileId) failure = "the cached file is " + entry.modioFileId + ", the live " + step.Str("platform") + " file is " + live;
+        }
+
         #endregion
 
         #region State of the connection
@@ -467,9 +522,10 @@ namespace AMP.ModSync {
             return Connected() && ModManager.clientSync != null && ModManager.clientSync.syncData.server_config != null;
         }
 
+        // Nothing left to set up: mods this platform can't get (Quest) are only a warning
         private static bool PlanEmpty() {
             SyncPlan plan = ModSyncClient.Plan;
-            return plan == null || (plan.steps.Count == 0 && !plan.loadOrderDiffers);
+            return plan == null || (plan.steps.All(s => s.action == SyncAction.Unavailable) && !plan.loadOrderDiffers);
         }
 
         #endregion

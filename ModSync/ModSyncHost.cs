@@ -2,6 +2,7 @@ using AMP.Data;
 using AMP.Logging;
 using AMP.Network.Data;
 using AMP.Network.Packets.Implementation;
+using AMP.Threading;
 using Netamite.Server.Data;
 using Newtonsoft.Json;
 using System;
@@ -17,6 +18,7 @@ namespace AMP.ModSync {
         private const int SETUP_TIMEOUT_MS  = 30 * 60 * 1000; // time a joiner gets to look at / set up mods
         private const int CHECK_TIMEOUT_MS  = 15 * 60 * 1000; // time a joiner gets to scan its mods
         internal const int MAX_REPORT_PARTS = 10;             // a joiner's report is tiny, anything longer is not one
+        private const int MATCH_WAIT_MS     = 30 * 1000;      // how long a joiner's mod list waits for the Quest matching of a new hosting session
 
         // ClientData.modSyncState; every change goes through Transition so concurrent packets and timers can't both win
         private const string WAITING = "waiting";
@@ -25,7 +27,7 @@ namespace AMP.ModSync {
         private const string READY   = "ready";
         private const string KICKED  = "kicked";
 
-        private static Task<string> hostModSetJson;
+        private static Task<HostModSet> hostModSet;
 
         // What ModTransferHost may serve: the enabled mods of the last scan (null until it finished) and the folder they live in
         internal static volatile List<ModEntry> HostMods;
@@ -44,7 +46,8 @@ namespace AMP.ModSync {
 
         // Main thread, before the server starts: settings and paths are read here, the folder scan runs in the background
         internal static void Prepare() {
-            hostModSetJson = null;
+            hostModSet = null;
+            QuestMatcher.Stop();
             int generation = ++prepareGeneration;
             HostMods       = null;
             HostModsFolder = null;
@@ -62,24 +65,34 @@ namespace AMP.ModSync {
                 mode         = mode,
                 personalMods = (ModManager.safeFile.hostingSettings.personalMods ?? new string[0]).Where(name => !string.IsNullOrWhiteSpace(name)).ToArray(),
             };
-            hostModSetJson = Task.Run(() => {
+            QuestMatcher.Begin();
+            hostModSet = Task.Run(() => {
                 List<ModEntry> mods = ModInventory.Scan(modsFolder, cacheFolder, true);
                 set.mods      = mods.Where(m => m.enabled).ToList();
                 if(generation == prepareGeneration) { // a scan of an earlier hosting session must not overwrite this one's list
                     HostModsFolder = modsFolder;
                     HostMods       = set.mods;
+                    Dispatcher.Enqueue(() => { if(generation == prepareGeneration) QuestMatcher.Run(set.mods); });
                 }
                 set.loadOrder = ModInventory.ReadLoadOrder(modsFolder);
                 ModEntry amp  = mods.FirstOrDefault(m => m.isAmp && m.enabled);
                 set.ampBuild  = amp != null ? amp.hash : "";
                 Log.Info(Defines.SERVER, $"Mod sync ({set.mode}): hosting with {set.mods.Count} mods.");
-                return JsonConvert.SerializeObject(set);
+                return set;
             });
+        }
+
+        // Serialized per joiner: Quest matches found since hosting started (or confirmed by the host) are included
+        private static string HostModSetJson(HostModSet set) {
+            lock(set) {
+                foreach(ModEntry mod in set.mods) mod.questModioId = QuestMatcher.QuestIdFor(mod.folder);
+                return JsonConvert.SerializeObject(set);
+            }
         }
 
         internal static void OnClientConnected(ClientData client) {
             ServerType server = ModManager.serverInstance;
-            if(hostModSetJson == null) { // mod sync off: the old, delayed greeting
+            if(hostModSet == null) { // mod sync off: the old, delayed greeting
                 server.GreetPlayer((ClientInformation) client);
                 return;
             }
@@ -87,23 +100,28 @@ namespace AMP.ModSync {
             // Timers and continuations below act on this server and mode only, never on a later hosting session
             string connectMode = mode;
             Transition(client, WAITING, "");
-            hostModSetJson.ContinueWith(t => {
+            hostModSet.ContinueWith(t => {
                 if(t.IsFaulted) {
                     Log.Err(Defines.SERVER, "Mod sync: scanning the host's mods failed, joining without it. " + t.Exception.GetBaseException().Message);
                     Greet(server, client, WAITING);
                     return;
                 }
-                if(!IsConnected(server, client)) return;
-                try {
-                    foreach(ModSyncPacket packet in ModSyncPacket.Create(ModSyncPacket.HOST_MOD_SET, t.Result)) {
-                        server.netamiteServer.SendTo(client, packet);
-                    }
-                } catch(Exception e) {
-                    // The timeout below still decides what happens to this joiner
-                    Log.Err(Defines.SERVER, "Mod sync: couldn't send the mod list to " + client.ClientName + ". " + e.Message);
-                }
-                Task.Delay(REPORT_TIMEOUT_MS).ContinueWith(_ => OnReportTimeout(server, client, connectMode));
+                // Right after hosting started mod.io is still being asked for Quest versions; a joiner gets the list once that is done (or soon anyway)
+                Task.WhenAny(QuestMatcher.PassDone, Task.Delay(MATCH_WAIT_MS)).ContinueWith(_ => SendHostModSet(server, client, t.Result, connectMode));
             });
+        }
+
+        private static void SendHostModSet(ServerType server, ClientData client, HostModSet set, string connectMode) {
+            if(!IsConnected(server, client)) return;
+            try {
+                foreach(ModSyncPacket packet in ModSyncPacket.Create(ModSyncPacket.HOST_MOD_SET, HostModSetJson(set))) {
+                    server.netamiteServer.SendTo(client, packet);
+                }
+            } catch(Exception e) {
+                // The timeout below still decides what happens to this joiner
+                Log.Err(Defines.SERVER, "Mod sync: couldn't send the mod list to " + client.ClientName + ". " + e.Message);
+            }
+            Task.Delay(REPORT_TIMEOUT_MS).ContinueWith(_ => OnReportTimeout(server, client, connectMode));
         }
 
         // Frees what a half-sent report of this client still occupies

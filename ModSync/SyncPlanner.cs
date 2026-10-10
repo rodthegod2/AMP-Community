@@ -11,6 +11,8 @@ namespace AMP.ModSync {
         public ModEntry   hostMod;   // null for Disable
         public ModEntry   localMod;  // null for Add and Unavailable
         public string     source = ""; // "modio" or "host" for Add/Replace
+        public long       modioId;     // source "modio": the mod.io mod to download (on Quest it can be another page than the host's)
+        public string     cacheHash;   // set after a download that isn't stored under the host's hash (another platform's build)
 
         public ModEntry Mod { get { return hostMod ?? localMod; } }
     }
@@ -18,6 +20,7 @@ namespace AMP.ModSync {
     public class SyncPlan {
         public List<SyncStep> steps = new List<SyncStep>();
         public bool loadOrderDiffers;
+        public bool crossPlatform;     // the host plays on another platform: downloads are this platform's builds, their size isn't known here
         public bool ampDiffers;
 
         // Mods a crossplay player can't get only produce a warning; everything else needs setting up first
@@ -43,7 +46,8 @@ namespace AMP.ModSync {
             sb.AppendLine(title + ":");
             foreach(SyncStep step in group) {
                 string line = "  " + (step.Mod.isAmp ? "AMP update (host's build) (stays installed; your previous build is kept in AMP_ModCache/old)" : step.Mod.name);
-                if(action == SyncAction.Add || action == SyncAction.Replace) line += " (" + Megabytes(step.Mod.sizeBytes) + ")";
+                if((action == SyncAction.Add || action == SyncAction.Replace) && !crossPlatform) line += " (" + Megabytes(step.Mod.sizeBytes) + ")";
+                if(action == SyncAction.Add && crossPlatform) line += " (from mod.io)";
                 if(step.Mod.hasCode && action != SyncAction.Disable) line += " [contains code]";
                 sb.AppendLine(line);
             }
@@ -58,6 +62,7 @@ namespace AMP.ModSync {
         public static SyncPlan Plan(HostModSet host, List<ModEntry> local, string[] localLoadOrder, string localPlatform) {
             var plan = new SyncPlan();
             bool samePlatform = string.Equals(host.platform, localPlatform, StringComparison.OrdinalIgnoreCase);
+            plan.crossPlatform = !samePlatform;
             var personal = new HashSet<string>(host.personalMods ?? new string[0], StringComparer.OrdinalIgnoreCase);
             Func<ModEntry, bool> leftAlone = m => m.isAmp || personal.Contains(m.folder);
 
@@ -69,10 +74,11 @@ namespace AMP.ModSync {
 
             foreach(ModEntry hostMod in hostMods.Where(m => m.enabled && !leftAlone(m))) {
                 ModEntry localMod = mine.FirstOrDefault(m => !matched.Contains(m) && SameMod(hostMod, m, samePlatform));
-                string source = hostMod.modioId > 0 ? "modio" : (samePlatform ? "host" : "");
+                long modioId = samePlatform ? hostMod.modioId : QuestModioId(hostMod);
+                string source = modioId > 0 ? "modio" : (samePlatform ? "host" : "");
 
                 if(localMod == null) {
-                    plan.steps.Add(new SyncStep { action = source == "" ? SyncAction.Unavailable : SyncAction.Add, hostMod = hostMod, source = source });
+                    plan.steps.Add(new SyncStep { action = source == "" ? SyncAction.Unavailable : SyncAction.Add, hostMod = hostMod, source = source, modioId = modioId });
                     continue;
                 }
                 matched.Add(localMod);
@@ -104,10 +110,19 @@ namespace AMP.ModSync {
             return plan;
         }
 
+        // Across platforms: the host's questModioId when it sent one (-1: the host knows there is no Quest version), else its own mod.io id
+        // (older hosts). 0: nothing to download.
+        internal static long QuestModioId(ModEntry hostMod) {
+            if(hostMod.questModioId != 0) return Math.Max(0, hostMod.questModioId);
+            return hostMod.modioId;
+        }
+
+        // a: the host's mod, b: ours
         internal static bool SameMod(ModEntry a, ModEntry b, bool samePlatform) {
             if(string.Equals(a.folder, b.folder, StringComparison.OrdinalIgnoreCase)) return true;
             if(samePlatform) return false;
-            if(a.modioId > 0 && b.modioId > 0) return a.modioId == b.modioId;
+            if(b.modioId > 0 && (b.modioId == a.modioId || b.modioId == a.questModioId)) return true;
+            if(a.modioId > 0 && b.modioId > 0) return false;
             return Normalize(a.name) != "" && Normalize(a.name) == Normalize(b.name);
         }
 

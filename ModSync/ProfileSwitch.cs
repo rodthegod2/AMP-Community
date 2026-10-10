@@ -19,7 +19,8 @@ namespace AMP.ModSync {
             string oldPartial = null;
             PlatformBase platform = null;
             try {
-                if(Active || ModSyncPaths.Platform != "windows" || !ModSwapClient.CanRestore) return; // CanRestore: the journal is Applied or RestorePending
+                if(Active || !ModSwapClient.CanRestore) return; // CanRestore: the journal is Applied or RestorePending
+                if(ModSyncPaths.Platform != "windows") { Log.Info(Defines.AMP, "Multiplayer profile not supported on Quest yet: your own characters are used."); return; }
 
                 platform = GameManager.platform;
                 if(!(platform is PlatformWindows)) { Log.Info(Defines.AMP, "Multiplayer profile: not a Windows platform, skipped."); return; }

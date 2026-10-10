@@ -70,6 +70,8 @@ namespace AMP.Data {
             // Mod downloads from the host: upload speed limit per joiner (KB/s, 0 = unlimited) and largest download a joiner may request
             public int      modUploadKBps          = 4096;
             public int      maxModTransferMB       = 4096;
+            // Quest versions of the host's mods, by mod folder (see ModSync/ModMatcher.cs). Filled when hosting starts; modioId 0 = no Quest version
+            public Dictionary<string, ModSync.ModMatch> modMatches = new Dictionary<string, ModSync.ModMatch>();
 
             
             public bool useModWhitelist            = false;

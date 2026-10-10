@@ -28,6 +28,7 @@ namespace AMP.ModSync {
             internal long   fileId; // the mod.io file that was downloaded
             internal string fileName = "";
             internal string version  = "";
+            internal bool   cached;  // alreadyCached said yes for this file: nothing was downloaded (folder and root are null)
         }
 
         private static bool isolatedForTest;
@@ -127,7 +128,32 @@ namespace AMP.ModSync {
         // Coroutine: downloads the mod's current file (the one mod.io serves this platform) into a new folder of the cache's partial area,
         // checks it (the plugin verifies the MD5) and extracts it safely. done always gets a result; on success the caller owns result.root
         // and must delete it after committing result.folder (on failure nothing is left behind). stillWanted() false: stop and clean up, done is not called.
-        internal static IEnumerator Download(long id, ModCache cache, long maxBytes, Action<float> progress, Func<bool> stillWanted, Action<DownloadResult> done) {
+        // alreadyCached (optional): asked with the live file's id first; true = that file is in the cache already, nothing is downloaded.
+        // A PC test simulating another platform (-amp-simulate-platform) asks mod.io as that platform, so it gets that platform's file.
+        internal static IEnumerator Download(long id, ModCache cache, long maxBytes, Action<float> progress, Func<bool> stillWanted, Action<DownloadResult> done, Func<long, bool> alreadyCached = null) {
+            string previousHeader = ModSyncPaths.Simulated ? SetPlatformHeader(ModSyncPaths.Platform) : null;
+            try {
+                IEnumerator inner = DownloadFile(id, cache, maxBytes, progress, stillWanted, done, alreadyCached);
+                while(inner.MoveNext()) yield return inner.Current;
+            } finally {
+                if(previousHeader != null) SetPlatformHeader(previousHeader);
+            }
+        }
+
+        // The platform the plugin tells mod.io it is (header x-modio-platform, PlatformConfiguration.RESTAPI_HEADER, "Windows" on PC). It is global:
+        // only a simulating test changes it, and puts the previous value back. Returns the previous value. On a Quest the plugin is built for
+        // Android and should send its own platform, so nothing is forced there (unverified on a headset).
+        private static string SetPlatformHeader(string platform) {
+            FieldInfo field = typeof(ModIOUnity).Assembly.GetType("ModIO.Implementation.Platform.PlatformConfiguration")?.GetField("RESTAPI_HEADER", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            string previous = field?.GetValue(null) as string ?? RestApiPlatform.Windows.ToString();
+            RestApiPlatform value;
+            if(!Enum.TryParse(platform, true, out value)) throw new ArgumentException("unknown mod.io platform " + platform);
+            ModIO.Util.Utility.ForceSetPlatformHeader(value);
+            Debug.Log("[AMP] mod.io: platform header " + previous + " -> " + value);
+            return previous;
+        }
+
+        private static IEnumerator DownloadFile(long id, ModCache cache, long maxBytes, Action<float> progress, Func<bool> stillWanted, Action<DownloadResult> done, Func<long, bool> alreadyCached) {
             var result = new DownloadResult();
 
             ModProfile? profile = null;
@@ -145,6 +171,7 @@ namespace AMP.ModSync {
             result.fileName = file.filename ?? "";
             result.version  = file.version ?? "";
             if(file.id <= 0) { result.error = "mod " + id + " has no file for this platform on mod.io"; done(result); yield break; }
+            if(alreadyCached != null && alreadyCached(file.id)) { result.cached = true; done(result); yield break; }
             if(file.filesize > maxBytes) { result.error = "the mod.io file is larger than expected (" + file.filesize + " bytes)"; done(result); yield break; }
 
             string root = cache.NewStagingFolder();
@@ -195,7 +222,24 @@ namespace AMP.ModSync {
             }
             result.root   = root;
             result.folder = unpack.Result;
+            ServedFile(operation, result);
             done(result);
+        }
+
+        // The file the operation really downloaded (it asks mod.io itself, GetMod above may come from the plugin's cache)
+        private static void ServedFile(ModIO.Util.DownloadModToStreamOperation operation, DownloadResult result) {
+            try {
+                object served = typeof(ModIO.Util.DownloadModToStreamOperation).GetField("modfileObject", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(operation);
+                if(served == null) return;
+                Type type = served.GetType();
+                long fileId = (long) type.GetField("id").GetValue(served);
+                if(fileId <= 0) return;
+                result.fileId   = fileId;
+                result.fileName = type.GetField("filename").GetValue(served) as string ?? result.fileName;
+                result.version  = type.GetField("version").GetValue(served) as string ?? result.version;
+            } catch(Exception e) {
+                Log.Warn(Defines.CLIENT, "mod.io: couldn't read which file was downloaded. " + e.Message);
+            }
         }
 
         // Runs a nested coroutine so that an exception in it ends only it (reported to failed) and not the coroutine that waits for it

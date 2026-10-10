@@ -17,7 +17,9 @@ using Debug = UnityEngine.Debug;
 namespace AMP.ModSync {
     // PC joiner: downloads the host's mods, closes the game, lets the helper swap the folders (JournalApplier, outside the game because files are locked),
     // reconnects on the next start, and puts the player's own mods back (Temporary swaps on quit, or through "Restore my mods").
-    // Everything here runs on the main thread. JournalApplier is never called in-game on PC.
+    // Quest (android): no helper and no file locks, so the journal is applied and undone in-game; the game then closes and the player starts it
+    // again (Android apps can't restart themselves). Mods of a PC host come from mod.io (the Quest builds the host mapped them to).
+    // Everything here runs on the main thread. JournalApplier is never called in-game on PC (a PC test simulating android does, with JSON-only mods).
     internal static class ModSwapClient {
         private const float RETRY_COOLDOWN = 3f;   // the host ignores mod requests within 2 s of the previous one
         private const float LEVEL_WAIT_MAX = 600f; // how long to wait for the player to load into a level
@@ -38,14 +40,20 @@ namespace AMP.ModSync {
             get { return journal != null && (journal.state == SwapState.Applied || journal.state == SwapState.RestorePending); }
         }
 
-        // PC only, Windows host: the host has every file (mod.io mods are fetched from mod.io first when it serves the host's version)
+        // Quest: the swap is applied in-game (no helper, no file locks there)
+        internal static bool InGame { get { return ModSyncPaths.Platform == "android"; } }
+
+        // PC with a Windows host: the host has every file (mod.io mods are fetched from mod.io first when it serves the host's version).
+        // Quest: what the plan adds comes from mod.io (another platform's host) or from a Quest host; AMP itself is never swapped in-game.
         internal static bool CanDownload(SyncPlan plan) {
             HostModSet set = ModSyncClient.HostSet;
-            if(plan == null || set == null || !ModSyncPaths.Available || ModSyncPaths.Platform != "windows") return false;
-            if(!string.Equals(set.platform, ModSyncPaths.Platform, StringComparison.OrdinalIgnoreCase)) return false;
-            if(!plan.BlocksJoin) return false;
-            return plan.Of(SyncAction.Add).Concat(plan.Of(SyncAction.Replace))
-                       .All(s => s.hostMod != null && !string.IsNullOrEmpty(s.hostMod.hash) && !string.IsNullOrEmpty(s.hostMod.folder));
+            if(plan == null || set == null || !ModSyncPaths.Available || !plan.BlocksJoin) return false;
+            bool samePlatform = string.Equals(set.platform, ModSyncPaths.Platform, StringComparison.OrdinalIgnoreCase);
+            List<SyncStep> fetch = plan.Of(SyncAction.Add).Concat(plan.Of(SyncAction.Replace)).ToList();
+            if(fetch.Any(s => s.hostMod == null || string.IsNullOrEmpty(s.hostMod.folder))) return false;
+            if(ModSyncPaths.Platform == "windows") return samePlatform && fetch.All(s => !string.IsNullOrEmpty(s.hostMod.hash));
+            if(!InGame || fetch.Any(s => s.hostMod.isAmp)) return false;
+            return fetch.All(s => s.source == "modio" ? s.modioId > 0 : samePlatform && !string.IsNullOrEmpty(s.hostMod.hash));
         }
 
         // A new connection starts: nothing of a half-finished download may leak into it. The journal stays.
@@ -73,10 +81,60 @@ namespace AMP.ModSync {
             int current = ++attempt;
             Progress("Asking the host for the mods...");
 
+            if(!string.Equals(set.platform, ModSyncPaths.Platform, StringComparison.OrdinalIgnoreCase)) {
+                // Another platform's host: every download is that mod's build for this platform from mod.io
+                ModManager.instance.StartCoroutine(FetchForThisPlatform(plan.Of(SyncAction.Add).ToList(), current, () => ApplyInGame(plan, set, mode)));
+                return;
+            }
             List<ModEntry> mods = plan.Of(SyncAction.Replace).Concat(plan.Of(SyncAction.Add)).Select(s => s.hostMod).ToList();
             List<ModEntry> fromModio = plan.Of(SyncAction.Add).Where(s => s.source == "modio" && s.hostMod.modioId > 0 && !s.hostMod.isAmp).Select(s => s.hostMod).ToList();
             // mod.io first; whatever it couldn't deliver as the host's version comes from the host (mods already in the cache are skipped there)
             ModManager.instance.StartCoroutine(FetchFromModio(fromModio, current, () => DownloadFromHost(plan, set, mode, mods, current)));
+        }
+
+        // Cross-platform: the mod.io mod the host mapped each mod to, as this platform's file. It can't match the host's hash (another build),
+        // so it is stored under its own hash (step.cacheHash) with its mod.io ids; a file already in the cache is not downloaded again.
+        // Any mod that can't be downloaded stops the whole setup (nothing has been changed yet).
+        private static IEnumerator FetchForThisPlatform(List<SyncStep> steps, int current, Action next) {
+            var cache = new ModCache(ModSyncPaths.CacheFolder);
+            long cacheBytes = Math.Max(0, ModManager.safeFile.modSettings.modCacheMaxMB) * 1024L * 1024L;
+            long maxBytes = cacheBytes > 0 ? cacheBytes : 4096L * 1024 * 1024; // the host's size is another platform's build: only the cache limit applies
+            foreach(SyncStep step in steps) {
+                if(attempt != current) yield break;
+                string name = step.hostMod.name;
+                long modioId = step.modioId;
+                Progress("Downloading " + name + " from mod.io...");
+                ModioClient.DownloadResult download = null;
+                CacheEntry reused = null;
+                string crashed = null;
+                yield return ModioClient.Guarded(ModioClient.Download(modioId, cache, maxBytes,
+                    p => { if(attempt == current) Progress("Downloading " + name + " from mod.io...\n" + (int) (p * 100) + "%"); },
+                    () => attempt == current, r => download = r, fileId => (reused = cache.FindModioFile(modioId, fileId)) != null),
+                    e => crashed = e.GetType().Name + ": " + e.Message);
+                if(attempt != current) yield break;
+                if(download == null || download.error != null) {
+                    Fail("Couldn't download " + name + " from mod.io:\n" + (download == null ? crashed ?? "the download stopped" : download.error));
+                    yield break;
+                }
+                if(download.cached) {
+                    step.cacheHash = reused.hash;
+                    cache.Touch(reused.hash);
+                    Log.Info(Defines.CLIENT, "Mod sync: " + name + " (mod.io " + modioId + " file " + download.fileId + ") is already in the cache.");
+                    continue;
+                }
+
+                ModEntry expected = new ModEntry { folder = step.hostMod.folder, name = step.hostMod.name, modioId = modioId };
+                Task<CacheEntry> commit = Task.Run(() => cache.CommitUnverified(download.folder, expected, download.fileId)); // hashing: off the main thread
+                while(!commit.IsCompleted) yield return null;
+                ModioClient.TryDelete(download.root);
+                if(commit.IsFaulted || commit.Result == null) {
+                    Fail("Couldn't store " + name + " from mod.io" + (commit.IsFaulted ? ": " + commit.Exception.GetBaseException().Message : "."));
+                    yield break;
+                }
+                step.cacheHash = commit.Result.hash;
+                Log.Info(Defines.CLIENT, "Mod sync: " + name + " downloaded from mod.io " + modioId + ", file " + download.fileId + " (" + download.fileName + ", version " + download.version + ") for " + ModSyncPaths.Platform + ".");
+            }
+            if(attempt == current) next();
         }
 
         // Host mods that came from mod.io are downloaded from mod.io, one after the other. mod.io only serves a mod's latest file, so a download
@@ -128,6 +186,7 @@ namespace AMP.ModSync {
                 (ok, error) => {
                     if(attempt != current) return;
                     if(!ok) { Fail(error); return; }
+                    if(InGame) { ApplyInGame(plan, set, mode); return; }
                     try {
                         ApplyAfterDownload(plan, set, mode);
                     } catch(Exception e) {
@@ -139,6 +198,10 @@ namespace AMP.ModSync {
         }
 
         private static void ApplyAfterDownload(SyncPlan plan, HostModSet set, SwapMode mode) {
+            ApplyJournal(PlanJournal(plan, set, mode), Progress, "Closing the game to install the mods...\nIt reopens and reconnects by itself.", Fail);
+        }
+
+        private static SwapJournal PlanJournal(SyncPlan plan, HostModSet set, SwapMode mode) {
             ClientType client = ModManager.clientInstance;
             bool isIp = client != null && client.netclient is IPClient;
             string host = isIp ? ModManager.guiManager.join_ip : "";
@@ -148,7 +211,62 @@ namespace AMP.ModSync {
 
             SwapJournal planned = JournalPlanner.Build(plan, set.loadOrder, host, port, password, mode);
             planned.rejoinPending = isIp && port > 0; // a Steam lobby can't be rejoined by address: the player joins again by hand
-            ApplyJournal(planned, Progress, "Closing the game to install the mods...\nIt reopens and reconnects by itself.", Fail);
+            return planned;
+        }
+
+        private const float QuitDelay = 5f; // the player reads "start the game again" before it closes
+        private static bool closingForRestart; // the game closes to load the swapped mods: OnQuit must not undo them
+
+        // Quest: the journal is applied right here (off the main thread, renames only), then the game closes; the next start rejoins.
+        // Unverified on a headset: tested on PC with -amp-simulate-platform android and JSON-only mods (Application.Quit / quitting on Quest).
+        private static void ApplyInGame(SyncPlan plan, HostModSet set, SwapMode mode) {
+            SwapJournal planned;
+            try {
+                planned = PlanJournal(plan, set, mode);
+                Save(planned);
+            } catch(Exception e) {
+                Log.Err(Defines.CLIENT, "Mod swap: couldn't write the journal. " + e);
+                Fail("Couldn't start the mod swap: " + e.Message);
+                return;
+            }
+            Progress("Installing the mods...");
+            ModManager.instance.StartCoroutine(ApplyInGameRoutine(planned));
+        }
+
+        private static IEnumerator ApplyInGameRoutine(SwapJournal planned) {
+            string mods = ModSyncPaths.ModsFolder, cacheRoot = ModSyncPaths.CacheFolder, journalPath = JournalPath;
+            Task<bool> apply = Task.Run(() => JournalApplier.Apply(planned, mods, cacheRoot, Path.GetDirectoryName(journalPath), j => j.SaveTo(journalPath)));
+            while(!apply.IsCompleted) yield return null;
+            journal = planned;
+            if(apply.IsFaulted || !apply.Result) {
+                string error = apply.IsFaulted ? apply.Exception.GetBaseException().Message : planned.lastError;
+                Log.Err(Defines.CLIENT, "Mod swap: installing in-game failed (" + planned.state + "). " + error);
+                if(planned.state == SwapState.Restored) DeleteJournal(); // rolled back completely: nothing to remember
+                Fail("Couldn't install the mods: " + error + (planned.state == SwapState.Restored ? "\nNothing was changed." : "\nBook > Mods > AMP > Restore my mods."));
+                yield break;
+            }
+            Log.Info(Defines.CLIENT, "Mod swap: applied in-game (" + planned.ops.Count + " changes), closing the game for the restart.");
+            yield return CloseForRestart("Mods installed.\nRestart Blade & Sorcery to finish: it reconnects by itself.");
+        }
+
+        private static IEnumerator CloseForRestart(string text) {
+            closingForRestart = true;
+            Progress(text);
+            ModSyncClient.ShowNotice(text);
+            yield return new WaitForSecondsRealtime(QuitDelay);
+            Application.Quit();
+        }
+
+        // Quest: undoes the swap in-game (renames only). Called on quit, at startup when the last quit didn't get to it, and by "Restore my mods".
+        private static bool RestoreInGame() {
+            journal = Load();
+            if(journal == null) return true;
+            journal.state = SwapState.RestorePending;
+            Save(journal);
+            string journalPath = JournalPath;
+            bool ok = JournalApplier.Restore(journal, ModSyncPaths.ModsFolder, ModSyncPaths.CacheFolder, Path.GetDirectoryName(journalPath), j => j.SaveTo(journalPath));
+            Debug.Log("[AMP] Mod swap: in-game restore " + (ok ? "done" : "failed: " + journal.lastError) + (JournalApplier.LastNote.Length > 0 ? " (" + JournalApplier.LastNote + ")" : ""));
+            return ok;
         }
 
         // Saves the journal, starts the helper and closes the game once Windows confirms the helper runs (the helper applies the journal and relaunches).
@@ -253,6 +371,11 @@ namespace AMP.ModSync {
                         RejoinStarted = true;
                         Save(journal);
                         ModManager.instance.StartCoroutine(RejoinRoutine(journal.host, journal.port, journal.password));
+                    } else if(InGame) {
+                        // Quest: the last session ended without the restore on quit (Android may end an app without it). Unverified on a headset.
+                        bool restored = RestoreInGame();
+                        Notice(restored ? "Your own mods were put back after the last multiplayer session.\nRestart Blade & Sorcery to load them."
+                                        : "Your mods couldn't be restored automatically.\nBook > Mods > AMP > Restore my mods.");
                     }
                     // Temporary: restored on quit (OnQuit). A crash leaves Applied behind, "Restore my mods" handles it.
                     break;
@@ -264,8 +387,10 @@ namespace AMP.ModSync {
             try {
                 // The file is the truth (a helper may have changed it since this game started), never a stale in-memory copy
                 if(helperLaunched) return; // RestoreNow / the download already started the helper that handles this
+                if(closingForRestart) return; // Quest: the swap was just applied (or undone) and the player starts the game again
                 journal = Load();
                 if(journal == null || (journal.state != SwapState.Applied && journal.state != SwapState.RestorePending)) return;
+                if(InGame) { RestoreInGame(); return; } // Quest: undone right here; unverified on a headset that quitting always fires
                 journal.state = SwapState.RestorePending;
                 Save(journal);
                 // Temporary puts everything back; Keep only re-enables what was disabled and restores the load order
@@ -287,6 +412,12 @@ namespace AMP.ModSync {
             try {
                 journal = Load(); // never save a stale in-memory copy over what the helper wrote
                 if(!CanRestore) { busy = false; return; }
+                if(InGame) {
+                    // Quest: undone in-game; the mods loaded now stay until the game restarts
+                    if(RestoreInGame()) ModManager.instance.StartCoroutine(CloseForRestart("Your mods are restored.\nRestart Blade & Sorcery to load them."));
+                    else { busy = false; Notice("Your mods couldn't be restored completely:\n" + journal.lastError); }
+                    return;
+                }
                 before = journal.state;
                 journal.state = SwapState.RestorePending;
                 Save(journal);

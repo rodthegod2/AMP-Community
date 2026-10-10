@@ -31,6 +31,9 @@ internal static class Program {
         AutopilotTests();
         RelaunchTests();
         ModioTests();
+        MatcherTests();
+        QuestTests();
+        QuestFlowTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -1069,6 +1072,162 @@ internal static class Program {
             && steps.Steps[2].Str("expectFile", null) == "Spell_SlowTime.json" && steps.Steps[3].Str("expectFile", null) == null);
         T("a mod.io id must be positive", AutopilotScript.Parse(@"[{""step"":""modioGetMod"",""id"":0,""expectName"":""x""}]", out error) == null);
     }
+
+    private static ModioCandidate C(long id, string name, string author, bool android = true, bool oculus = false) {
+        return new ModioCandidate { id = id, name = name, author = author, android = android, oculus = oculus };
+    }
+
+    private static void MatcherTests() {
+        ModEntry fascia = M("Fascia");
+        fascia.author = "Goldmask";
+        T("matcher: same name and author is automatic", ModMatcher.Score(fascia, C(1, "Fascia", "goldmask")) == MatchScore.Auto);
+        T("matcher: same name, other author needs confirming", ModMatcher.Score(fascia, C(1, "Fascia", "SomeoneElse")) == MatchScore.Confirm);
+        T("matcher: names compare ignoring case, spaces and punctuation", ModMatcher.Score(fascia, C(1, "FASCIA!", "Gold mask")) == MatchScore.Auto);
+        T("matcher: no Quest file means no match", ModMatcher.Score(fascia, C(1, "Fascia", "Goldmask", android: false)) == MatchScore.None);
+        T("matcher: an Oculus file counts", ModMatcher.Score(fascia, C(1, "Fascia", "Goldmask", android: false, oculus: true)) == MatchScore.Auto);
+        ModEntry jjs = M("JujutsuSorcerers", name: "JujutsuSorcerers");
+        jjs.author = "Guts";
+        T("matcher: JujutsuSorcerers vs Jujutsu Sorcerers (Nomad) needs confirming", ModMatcher.Score(jjs, C(2, "Jujutsu Sorcerers (Nomad)", "Guts")) == MatchScore.Confirm);
+        T("matcher: containment works both ways", ModMatcher.Score(M("x", name: "Jujutsu Sorcerers Nomad Edition"), C(2, "JujutsuSorcerers", "y")) == MatchScore.Confirm);
+        T("matcher: short names don't match by containment", ModMatcher.Score(M("x", name: "Ice"), C(3, "Ice Spell", "y")) == MatchScore.None);
+        T("matcher: unrelated names don't match", ModMatcher.Score(fascia, C(4, "Mjolnir", "Goldmask")) == MatchScore.None);
+        ModEntry unknown = M("WindSpell");
+        unknown.author = "Unknown";
+        T("matcher: an author \"Unknown\" is not an author", ModMatcher.Score(unknown, C(5, "WindSpell", "unknown")) == MatchScore.Confirm);
+        T("matcher: an empty name never matches", ModMatcher.Score(M("x", name: ""), C(6, "", "a")) == MatchScore.None);
+        T("matcher: a mod.io tagline after | is not part of the name", ModMatcher.Score(fascia, C(7, "Fascia | SFX + VFX", "Goldmask")) == MatchScore.Auto
+            && ModMatcher.Score(fascia, C(7, "Fascia | SFX + VFX", "chronogoldmask")) == MatchScore.Confirm);
+        T("matcher: a name that is only a tagline doesn't match everything", ModMatcher.Score(fascia, C(8, "| Fascia", "Goldmask")) == MatchScore.Auto
+            && ModMatcher.Score(M("x", name: "Other"), C(8, "|", "Goldmask")) == MatchScore.None);
+
+        MatchScore score;
+        ModioCandidate best = ModMatcher.Best(fascia, new[] { C(10, "Fascia Remastered", "x"), null, C(11, "Fascia", "Goldmask", android: false), C(12, "Fascia", "Goldmask") }, out score);
+        T("matcher: an automatic match wins over an earlier one to confirm", best != null && best.id == 12 && score == MatchScore.Auto);
+        best = ModMatcher.Best(fascia, new[] { C(20, "Other", "x"), C(21, "Fascia", "x"), C(22, "Fascia (Quest)", "y") }, out score);
+        T("matcher: otherwise the first one to confirm", best != null && best.id == 21 && score == MatchScore.Confirm);
+        T("matcher: nothing matching gives null", ModMatcher.Best(fascia, new[] { C(30, "Other", "x") }, out score) == null && score == MatchScore.None && ModMatcher.Best(fascia, null, out score) == null);
+
+        T("search phrases: the name, then its words", ModMatcher.SearchPhrases("JujutsuSorcerers").SequenceEqual(new[] { "JujutsuSorcerers", "Jujutsu Sorcerers" }));
+        T("search phrases: a plain name once", ModMatcher.SearchPhrases(" Fascia ").SequenceEqual(new[] { "Fascia" }) && ModMatcher.SearchPhrases(null).Count == 0);
+        T("search phrases: underscores split too", ModMatcher.SearchPhrases("AT_Destiny Megapack").Last() == "AT Destiny Megapack");
+
+        DateTime now = new DateTime(2026, 10, 10, 0, 0, 0, DateTimeKind.Utc);
+        T("quest id: nothing stored is unknown", ModMatcher.QuestId(null) == 0);
+        T("quest id: a match gives its id", ModMatcher.QuestId(new ModMatch { modioId = 5966899, confirmed = true }) == 5966899);
+        T("quest id: no Quest version is -1", ModMatcher.QuestId(new ModMatch { modioId = 0, confirmed = true }) == -1);
+        T("recheck: nothing stored", ModMatcher.NeedsCheck(null, now));
+        T("recheck: never for a confirmed answer", !ModMatcher.NeedsCheck(new ModMatch { confirmed = true, checkedTicks = now.AddYears(-1).Ticks }, now));
+        T("recheck: not for a recent unconfirmed answer", !ModMatcher.NeedsCheck(new ModMatch { checkedTicks = now.AddDays(-6).Ticks }, now));
+        T("recheck: after a week for an unconfirmed answer", ModMatcher.NeedsCheck(new ModMatch { checkedTicks = now.AddDays(-8).Ticks }, now));
+    }
+
+    private static ModEntry Q(string folder, long modio = 0, long quest = 0, string name = null) {
+        ModEntry m = M(folder, modio: modio, name: name);
+        m.questModioId = quest;
+        return m;
+    }
+
+    private static void QuestTests() {
+        // HostModSet stays compatible both ways: older builds ignore questModioId, older hosts don't send it
+        var set = Host("windows", Q("JJS", quest: 77));
+        string json = Newtonsoft.Json.JsonConvert.SerializeObject(set);
+        T("host mod set carries questModioId", json.Contains("\"questModioId\":77") && Newtonsoft.Json.JsonConvert.DeserializeObject<HostModSet>(json).mods[0].questModioId == 77);
+        string old = "{\"protocol\":1,\"platform\":\"windows\",\"mods\":[{\"folder\":\"A\",\"name\":\"A\",\"modioId\":5,\"hash\":\"h\",\"enabled\":true}]}";
+        T("a 1.0.0 host's set reads with questModioId 0", Newtonsoft.Json.JsonConvert.DeserializeObject<HostModSet>(old).mods[0].questModioId == 0);
+        T("an unknown field (what a 1.0.0 joiner sees) is ignored", Newtonsoft.Json.JsonConvert.DeserializeObject<OldEntry>("{\"folder\":\"A\",\"questModioId\":7}").folder == "A");
+
+        var mapped = P(Host("windows", Q("JJS", quest: 77), Q("NexusOnly"), Q("Gone", quest: -1)), "android");
+        SyncStep add = mapped.Of(SyncAction.Add).Single();
+        T("quest: a mapped Nexus mod comes from its mod.io match", add.hostMod.folder == "JJS" && add.source == "modio" && add.modioId == 77);
+        T("quest: the summary doesn't show the PC build's size", mapped.Describe().Contains("JJS (from mod.io)") && !mapped.Describe().Contains("MB"));
+        T("quest: unmapped and known-missing mods are unavailable", mapped.Of(SyncAction.Unavailable).Select(s => s.hostMod.folder).OrderBy(x => x).SequenceEqual(new[] { "Gone", "NexusOnly" }));
+        var noQuestFile = P(Host("windows", Q("PcOnly", modio: 9, quest: -1)), "android");
+        T("quest: a mod.io mod without a Quest file is unavailable", noQuestFile.Of(SyncAction.Unavailable).Single().hostMod.folder == "PcOnly");
+        var oldHost = P(Host("windows", Q("A", modio: 9)), "android");
+        T("quest: an older host's mod.io mod is still tried from mod.io", oldHost.Of(SyncAction.Add).Single().modioId == 9);
+        var otherPage = P(Host("windows", Q("A", modio: 9, quest: 10)), "android");
+        T("quest: a separate Quest page wins over the host's own id", otherPage.Of(SyncAction.Add).Single().modioId == 10);
+        T("same platform: questModioId is not used", P(Host("windows", Q("A", quest: 10)), "windows").Of(SyncAction.Add).Single().source == "host");
+
+        ModEntry installedFromModio = Q("JJS_Quest", modio: 77, name: "Something else");
+        T("quest: our copy installed from the matched mod.io page counts as the host's mod", P(Host("windows", Q("JJS", quest: 77)), "android", installedFromModio).steps.Count == 0);
+        T("quest: our copy installed under the host's folder counts too", P(Host("windows", Q("JJS", quest: 77)), "android", Q("JJS", name: "x")).steps.Count == 0);
+        T("quest: different mod.io ids don't match", P(Host("windows", Q("A", modio: 5, name: "Same")), "android", Q("B", modio: 6, name: "Same")).Of(SyncAction.Disable).Count() == 1);
+
+        // Downloads for another platform are stored under their own hash: the journal installs that entry under the host's folder name
+        var plan = new SyncPlan();
+        plan.steps.Add(new SyncStep { action = SyncAction.Add, hostMod = M("JJS", hash: new string('a', 64)), source = "modio", modioId = 77, cacheHash = new string('c', 64) });
+        plan.steps.Add(new SyncStep { action = SyncAction.Add, hostMod = M("Plain", hash: new string('b', 64)), source = "host" });
+        SwapJournal j = JournalPlanner.Build(plan, null, "h", 1, "", SwapMode.Temporary);
+        T("journal: a cross-platform download installs its own cache entry", j.ops.Any(o => o.kind == SwapOpKind.Install && o.folder == "JJS" && o.hash == new string('c', 64)));
+        T("journal: other installs keep the host's hash", j.ops.Any(o => o.kind == SwapOpKind.Install && o.folder == "Plain" && o.hash == new string('b', 64)));
+
+        using(var f = new TestFolders()) {
+            var cache = new ModCache(Path.Combine(f.Root, "cache"));
+            Func<string, string> stage = name => {
+                string staged = Path.Combine(cache.NewStagingFolder(), "x");
+                Directory.CreateDirectory(staged);
+                File.WriteAllText(Path.Combine(staged, "manifest.json"), "{\"Name\":\"" + name + "\"}");
+                return staged;
+            };
+            CacheEntry noId = cache.CommitUnverified(stage("JJS Quest"), M("JJS", hash: new string('a', 64)), 555);
+            CacheEntry withId = cache.CommitUnverified(stage("JJS Quest 2"), M("JJS2", hash: "", modio: 77), 556);
+            T("cache: FindModioFile finds exactly that mod.io file", noId != null && withId != null && cache.FindModioFile(77, 556).hash == withId.hash
+                && cache.FindModioFile(77, 557) == null && cache.FindModioFile(0, 555) == null);
+        }
+
+        string[] args = { "BladeAndSorcery.exe", "-amp-test-docs", "C:\\t", "-amp-simulate-platform", "android" };
+        T("simulated platform: android in an isolated test", AutopilotScript.SimulatedPlatform(args, true) == "android");
+        T("simulated platform: ignored outside an isolated test", AutopilotScript.SimulatedPlatform(args, false) == null);
+        T("simulated platform: only android", AutopilotScript.SimulatedPlatform(new[] { "x", "-amp-simulate-platform", "ios" }, true) == null
+            && AutopilotScript.SimulatedPlatform(new[] { "x" }, true) == null);
+
+        string error;
+        var steps = AutopilotScript.Parse(@"[{""step"":""expectMatch"",""folder"":""Fascia"",""modioId"":5966899},{""step"":""expectMatch"",""folder"":""Probe"",""modioId"":1,""confirm"":true},
+            {""step"":""expectMatch"",""folder"":""AmpE2EDummy"",""modioId"":0},{""step"":""expectUnavailable"",""folder"":""AmpE2EDummy""},{""step"":""expectCachedModio"",""folder"":""InstantSloMo"",""platform"":""android""}]", out error);
+        T("quest steps parse (" + error + ")", steps != null && steps.Steps[0].Int("modioId") == 5966899 && steps.Steps[1].Bool("confirm") && steps.Steps[2].Int("modioId") == 0
+            && steps.Steps[4].Str("platform") == "android");
+        T("expectMatch needs a folder", AutopilotScript.Parse(@"[{""step"":""expectMatch"",""modioId"":1}]", out error) == null);
+    }
+
+    // The Quest sequence of ModSwapClient, headless: plan against a PC host, store the mod.io build under its own hash, apply in-game,
+    // plan again after the restart (only the warning is left), restore on quit
+    private static void QuestFlowTests() {
+        int savedRetryMs = JournalApplier.RetryMs;
+        JournalApplier.RetryMs = 200;
+        using(var f = new TestFolders()) {
+            f.Mod("TrueZeroEffort", name: "TrueZeroEffort");
+            var host = Host("windows", Q("InstantSloMo", quest: 2512544, name: "InstantSloMoSilent"), Q("AmpE2EDummy", quest: -1, name: "AMP E2E Dummy"));
+            SyncPlan plan = SyncPlanner.Plan(host, ModInventory.Scan(f.Mods, f.Cache, false), new string[0], "android");
+            T("quest flow: add from mod.io, turn off the extra mod, warn about the rest", plan.BlocksJoin && plan.Of(SyncAction.Add).Single().modioId == 2512544
+                && plan.Of(SyncAction.Disable).Single().localMod.folder == "TrueZeroEffort" && plan.Of(SyncAction.Unavailable).Single().hostMod.folder == "AmpE2EDummy");
+
+            var cache = new ModCache(f.Cache);
+            string staged = Path.Combine(cache.NewStagingFolder(), "x", "InstantSloMo");
+            Directory.CreateDirectory(staged);
+            File.WriteAllText(Path.Combine(staged, "manifest.json"), "{\"Name\":\"InstantSloMoSilent\",\"Author\":\"Jenix106\"}");
+            File.WriteAllText(Path.Combine(staged, "Spell_SlowTime.json"), "{\"android\":true}");
+            SyncStep add = plan.Of(SyncAction.Add).Single();
+            CacheEntry entry = cache.CommitUnverified(staged, new ModEntry { folder = add.hostMod.folder, name = add.hostMod.name, modioId = add.modioId }, 7000001);
+            add.cacheHash = entry.hash;
+
+            SwapJournal j = JournalPlanner.Build(plan, host.loadOrder, "127.0.0.1", 26950, "", SwapMode.Temporary);
+            string journalDir = Path.Combine(f.Cache, "journal");
+            T("quest flow: applied in-game", JournalApplier.Apply(j, f.Mods, f.Cache, journalDir) && j.state == SwapState.Applied);
+            T("quest flow: the mod.io build is installed under the host's folder", File.ReadAllText(Path.Combine(f.Mods, "InstantSloMo", "Spell_SlowTime.json")).Contains("android")
+                && Directory.Exists(Path.Combine(f.Mods, JournalApplier.OffPrefix + "TrueZeroEffort")));
+
+            SyncPlan after = SyncPlanner.Plan(host, ModInventory.Scan(f.Mods, f.Cache, false), new string[0], "android");
+            T("quest flow: after the restart only the warning is left", !after.BlocksJoin && after.steps.Count == 1 && after.steps[0].action == SyncAction.Unavailable);
+
+            T("quest flow: restored on quit", JournalApplier.Restore(j, f.Mods, f.Cache, journalDir) && j.state == SwapState.Restored);
+            T("quest flow: own mods back, the download back in the cache", Directory.Exists(Path.Combine(f.Mods, "TrueZeroEffort")) && !Directory.Exists(Path.Combine(f.Mods, "InstantSloMo"))
+                && cache.FindModioFile(2512544, 7000001) != null);
+        }
+        JournalApplier.RetryMs = savedRetryMs;
+    }
+
+    private class OldEntry { public string folder = ""; }
 
     private static void AutopilotTests() {
         string error;

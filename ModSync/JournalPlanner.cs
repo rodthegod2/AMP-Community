@@ -15,8 +15,9 @@ namespace AMP.ModSync {
                 if(step.localMod != null) journal.ops.Add(new SwapOp { kind = SwapOpKind.MoveAside, folder = step.localMod.folder, keep = true });
                 journal.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = step.hostMod.folder, hash = step.hostMod.hash, keep = true });
             }
+            // Installed under the host's folder name, so the next join pairs it with the host's mod by folder
             foreach(SyncStep step in plan.Steps(SyncAction.Replace, SyncAction.Add).Where(s => !s.hostMod.isAmp))
-                journal.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = step.hostMod.folder, hash = step.hostMod.hash });
+                journal.ops.Add(new SwapOp { kind = SwapOpKind.Install, folder = step.hostMod.folder, hash = step.cacheHash ?? step.hostMod.hash });
             if(plan.loadOrderDiffers)
                 journal.ops.Add(new SwapOp { kind = SwapOpKind.LoadOrder });
             return journal;

@@ -68,6 +68,9 @@ namespace AMP.UI {
         TextMeshProUGUI modSyncModeText;
         GameObject restoreModsButton;
         GameObject updateAmpButton;
+        TextMeshProUGUI questMatchText;
+        GameObject questMatchYes;
+        GameObject questMatchNo;
         TextMeshProUGUI updateAmpLabel;
         TextMeshProUGUI updateAmpStatus;
         RectTransform modSyncTextRect;
@@ -1294,6 +1297,23 @@ namespace AMP.UI {
             rect.localPosition = new Vector3(320, -270, 0);
             updateAmpButton.SetActive(false);
             updateAmpStatus.gameObject.SetActive(false);
+
+            // Host: "is this mod.io mod the Quest version of that mod?" (ModSync/QuestMatcher.cs), one question at a time on the connection page
+            gobj = CreateObject("QuestMatchText");
+            gobj.transform.SetParent(disconnectPanel, false);
+            questMatchText = gobj.AddComponent<TextMeshProUGUI>();
+            questMatchText.fontSize = 30;
+            questMatchText.enableAutoSizing = true;
+            questMatchText.fontSizeMin = 16;
+            questMatchText.fontSizeMax = 30;
+            questMatchText.color = Color.black;
+            questMatchText.alignment = TextAlignmentOptions.Center;
+            rect = gobj.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(1000, 90);
+            rect.localPosition = new Vector3(0, 0, 0);
+            questMatchYes = CreateModSyncButton(disconnectPanel, "QuestMatchYes", "Yes", new Vector3(-120, -85, 0), new Vector2(200, 70), 40, Color.black, () => AnswerQuestMatch(true));
+            questMatchNo  = CreateModSyncButton(disconnectPanel, "QuestMatchNo", "No", new Vector3(120, -85, 0), new Vector2(200, 70), 40, Color.black, () => AnswerQuestMatch(false));
+            RefreshQuestMatch();
             #endif
             #endregion
 
@@ -1772,6 +1792,7 @@ namespace AMP.UI {
                 }
                 if(ModSync.ProfileSwitch.Active) info += "\nMultiplayer profile (separate characters) - your own saves are untouched.";
                 serverInfoMessage.text = info;
+                RefreshQuestMatch();
 
                 #if DEBUG
                 try {
@@ -2980,11 +3001,27 @@ namespace AMP.UI {
             }
         }
 
+        private void RefreshQuestMatch() {
+            if(questMatchText == null) return;
+            ModSync.QuestMatcher.Candidate candidate = ModManager.serverInstance != null ? ModSync.QuestMatcher.Current : null;
+            questMatchText.gameObject.SetActive(candidate != null);
+            questMatchYes.SetActive(candidate != null);
+            questMatchNo.SetActive(candidate != null);
+            if(candidate != null) questMatchText.text = "Quest version of \"" + candidate.modName + "\"?\nmod.io: \"" + candidate.modio.name + "\" by " + candidate.modio.author;
+        }
+
+        private void AnswerQuestMatch(bool yes) {
+            ModSync.QuestMatcher.Answer(ModSync.QuestMatcher.Current, yes);
+            RefreshQuestMatch();
+        }
+
         private string ModSyncDownloadNote() {
             string note = "\n\n" + (swapMode == ModSync.SwapMode.Temporary
                 ? "Temporary: your own mods come back when you quit the game."
                 : "Keep: the host's mods stay installed. \"Restore my mods\" undoes it.");
-            note += "\nMultiplayer uses copies of your characters while the host's mods are installed.";
+            note += ModSync.ModSwapClient.InGame
+                ? "\nThe game closes after installing; start it again and it reconnects.\nYour own characters are used (no multiplayer copies on Quest yet): items of mods that get turned off can be lost."
+                : "\nMultiplayer uses copies of your characters while the host's mods are installed.";
             if(ModSync.ModSwapClient.LastError.Length > 0) note += "\n\n" + ModSync.ModSwapClient.LastError;
             return note;
         }

@@ -54,6 +54,10 @@ namespace AMP.ModSync {
             { "modioGetMod",         "id:int[1-999999999999] expectName:string" },   // mod.io has this mod under this name
             { "modioSearch",         "phrase:string expectId:int[1-999999999999]" }, // a mod.io search finds this mod on its first page
             { "modioDownload",       "id:int[1-999999999999] expectFile:string?" },  // downloads the mod from mod.io into the mod cache
+            // Host: the Quest match of a mod (modioId 0 = no Quest version). confirm: it must be waiting for the host's answer; it is answered Yes
+            { "expectMatch",         "folder:folder modioId:int[0-999999999999] confirm:bool?" },
+            { "expectUnavailable",   "folder:folder" },                              // the mod plan lists this host mod as not available here
+            { "expectCachedModio",   "folder:folder platform:string" },              // the cached copy of this mod is the mod.io file live for that platform
             { "quit",                "" },
         };
 
@@ -167,6 +171,15 @@ namespace AMP.ModSync {
             if(string.IsNullOrEmpty(after("-amp-autopilot"))) return "-amp-autopilot is missing";
             if(after("-vrmode") != "mockhmd") return "the last -vrmode is not mockhmd";
             return null;
+        }
+
+        public const string SimulatePlatformFlag = "-amp-simulate-platform";
+
+        // "-amp-simulate-platform android": a PC test takes the Quest paths (planning, delivery, in-game apply). Honoured only in an
+        // isolated test run and only for "android"; null otherwise (the real platform stays).
+        public static string SimulatedPlatform(string[] args, bool isolatedTestRun) {
+            string value = FindArg(args, SimulatePlatformFlag);
+            return isolatedTestRun && value == "android" ? value : null;
         }
 
         // The value after a flag (args[0] is the program, never a flag); null when the flag or its value is missing

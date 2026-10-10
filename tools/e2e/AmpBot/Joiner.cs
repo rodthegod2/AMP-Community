@@ -42,6 +42,7 @@ namespace AmpBot {
             this.list = list;
 
             if(x.planBlocks.HasValue) list.Expect("planBlocks=" + x.planBlocks.Value.ToString().ToLowerInvariant());
+            foreach(KeyValuePair<string, long> q in x.questIds) list.Expect("questId " + q.Key + "=" + q.Value);
             foreach(string folder in x.downloaded) list.Expect("downloaded " + folder);
             foreach(string file in x.files) list.Expect("file " + file);
             if(x.greeted) list.Expect("greeted");
@@ -171,7 +172,7 @@ namespace AmpBot {
         }
 
         private void Report(string status, string detail) {
-            string json = JsonConvert.SerializeObject(new JoinerReport { platform = "windows", status = status, detail = detail ?? "" });
+            string json = JsonConvert.SerializeObject(new JoinerReport { platform = x.platform, status = status, detail = detail ?? "" });
             foreach(ModSyncPacket packet in ModSyncPacket.Create(ModSyncPacket.JOINER_REPORT, json)) Send(packet);
             Out.Info("reported " + status);
         }
@@ -181,9 +182,16 @@ namespace AmpBot {
             Out.Info("host mod set: " + set.mods.Count + " mods, mode " + set.mode + ", platform " + set.platform + ", AMP " + Short(set.ampBuild));
             Report(JoinerStatus.Checking, "");
 
-            bool samePlatform = string.Equals(set.platform, "windows", StringComparison.OrdinalIgnoreCase);
+            Out.Info("questModioIds: " + string.Join(", ", set.mods.Select(m => m.folder + "=" + m.questModioId)));
+            foreach(KeyValuePair<string, long> q in x.questIds) {
+                ModEntry mod = set.mods.FirstOrDefault(m => m.folder == q.Key);
+                if(mod != null && mod.questModioId == q.Value) list.Mark("questId " + q.Key + "=" + q.Value);
+                else list.Fail("the host's mod list has " + q.Key + " with questModioId " + (mod == null ? "(missing)" : mod.questModioId.ToString()) + ", expected " + q.Value);
+            }
+
+            bool samePlatform = string.Equals(set.platform, x.platform, StringComparison.OrdinalIgnoreCase);
             List<ModEntry> local = ModInventory.Scan(modsFolder, cacheFolder, samePlatform);
-            SyncPlan plan = SyncPlanner.Plan(set, local, ModInventory.ReadLoadOrder(modsFolder), "windows");
+            SyncPlan plan = SyncPlanner.Plan(set, local, ModInventory.ReadLoadOrder(modsFolder), x.platform);
             Out.Info("plan blocksJoin=" + plan.BlocksJoin + " ampDiffers=" + plan.ampDiffers + ": " + plan.Describe());
 
             if(x.planBlocks.HasValue) {

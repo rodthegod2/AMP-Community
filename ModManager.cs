@@ -402,6 +402,7 @@ namespace AMP {
 
         public static void StopHost() {
             if(serverInstance == null) return;
+            ModSync.QuestMatcher.Stop();
             ModSync.SettingsSyncHost.Stop();
             ModSync.ModTransferHost.StopAll();
             serverInstance.Stop();

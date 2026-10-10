@@ -31,6 +31,7 @@
     <Compile Include="..\..\ModSync\ReleasePackage.cs" />
     <Compile Include="..\..\ModSync\AutopilotScript.cs" />
     <Compile Include="..\..\ModSync\ModioRules.cs" />
+    <Compile Include="..\..\ModSync\ModMatcher.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.IO.Compression" />

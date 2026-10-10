@@ -276,6 +276,8 @@
     <Compile Include="ModSync\ReleaseUpdater.cs" />
     <Compile Include="ModSync\ModioRules.cs" />
     <Compile Include="ModSync\ModioClient.cs" />
+    <Compile Include="ModSync\ModMatcher.cs" />
+    <Compile Include="ModSync\QuestMatcher.cs" />
     <Compile Include="Network\Packets\Implementation\ItemSpawnPacket.cs" />
     <Compile Include="Network\Packets\Implementation\LevelChangePacket.cs" />
     <Compile Include="Network\Packets\Implementation\CreatureSpawnPacket.cs" />

@@ -25,10 +25,15 @@ $OldBuild  = 'C:\Projects\bns-mp\build-0.9.9'              # this code built as 
 $PvP       = @{ mod = 'MultiplayerMod'; option = 'PvP' }
 $SloMo     = 'InstantSloMo'                                  # fixture copy of the mod.io mod 2512544 (tiny, JSON only)
 $SloMoId   = 2512544
+$FasciaId  = 5966899                                         # mod.io Fascia (separate Windows and Android files)
+$ZeroEffortId = 2512494                                      # mod.io "Zero Effort", the _TrueZeroEffort fixture
 # The player's real mod.io data (login, subscriptions, installed mod.io mods): tests isolate mod.io into the run folder, this proves it
 $ModioReal = @((Join-Path $env:LOCALAPPDATA 'mod.io\03852'), (Join-Path $env:LOCALAPPDATA 'mod.io\globalsettings.json'), (Join-Path $env:PUBLIC 'mod.io\3852'))
 
-# GameMods/BotMods: fixture folders next to MultiplayerMod (the AMP build under test, always present on both sides)
+# GameMods/BotMods: fixture folders next to MultiplayerMod (the AMP build under test, always present on both sides); "Fixture>Folder" stages a
+# fixture under another folder name. GameSetup/BotSetup: script blocks run on the staged folder (fixture variants). GameArgs: extra game arguments.
+# Relaunches: how often the runner starts the game again after it closed for a restart (the Quest flow: the player starts it, not AMP).
+# RestoreInGame: the swap is undone by the game itself when it quits (Quest), not by the helper.
 $Scenarios = [ordered]@{
     'host-basic' = @{
         GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
@@ -111,6 +116,41 @@ $Scenarios = [ordered]@{
                      @{ step = 'expectModFolder'; folder = $SloMo; present = $true }, @{ step = 'quit' })
         Expect   = @{ reports = @('needs_setup', 'ready'); served = @($SloMo); greetings = 1; lingerSec = 10 }
     }
+    'host-matcher' = @{
+        # Quest matching when hosting starts (real mod.io data). Fascia came from mod.io and has an Android file. InstantSloMo without its
+        # id.modio, its manifest named like its mod.io page ("Instant Slow-mo + Silent" by Jenix106), is found by name and author: automatic.
+        # TrueZeroEffort without its id.modio is only found as "True Zero Effort" (mod.io: "Zero Effort" by Jenix106): the host must say Yes.
+        # The dummy has no Quest version. The bot joins as a Quest player and must get these as questModioId.
+        GameMods = @($SloMo, 'Fascia', '_TrueZeroEffort>TrueZeroEffort', $Dummy); BotMods = @(); BotMode = 'join'
+        GameSetup = { param($mods)
+            Remove-Item -LiteralPath (Join-Path $mods "$SloMo\id.modio"), (Join-Path $mods 'TrueZeroEffort\id.modio')
+            $manifest = Join-Path $mods "$SloMo\manifest.json"
+            (Get-Content -Raw -LiteralPath $manifest) -replace '"Name": "InstantSloMoSilent"', '"Name": "Instant Slow-mo + Silent"' | Set-Content -NoNewline -LiteralPath $manifest
+            if (-not (Select-String -Quiet -LiteralPath $manifest -Pattern 'Instant Slow-mo \+ Silent')) { throw 'renaming the InstantSloMo fixture failed' }
+        }
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 },
+                     @{ step = 'expectMatch'; folder = 'Fascia'; modioId = $FasciaId }, @{ step = 'expectMatch'; folder = $SloMo; modioId = $SloMoId },
+                     @{ step = 'expectMatch'; folder = 'TrueZeroEffort'; modioId = $ZeroEffortId; confirm = $true }, @{ step = 'expectMatch'; folder = $Dummy; modioId = 0 },
+                     @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 5 }, @{ step = 'quit' })
+        Expect   = @{ platform = 'android'; questIds = @{ $SloMo = $SloMoId; 'Fascia' = $FasciaId; $Dummy = -1 }; greeted = $true }
+    }
+    'join-quest-sim' = @{
+        # The game is a Quest player (-amp-simulate-platform android) joining a PC host. The host's InstantSloMo has no id.modio (as if from Nexus)
+        # and is mapped to mod.io 2512544; the dummy has no Quest version. The game downloads the Android file from mod.io, swaps in-game
+        # (TrueZeroEffort, which the host lacks, is turned off), closes; the runner starts it again like the player would; it rejoins.
+        # InstantSloMo has one file for Windows and Android, so Fascia (separate files) is also downloaded, into the cache only (its asset bundles
+        # are Android builds): it must be the Android file, i.e. mod.io was asked as Android.
+        GameMods = @('_TrueZeroEffort>TrueZeroEffort'); BotMods = @($SloMo, $Dummy); BotMode = 'host'
+        BotSetup = { param($mods) Remove-Item -LiteralPath (Join-Path $mods "$SloMo\id.modio") }
+        GameArgs = @('-amp-simulate-platform', 'android'); Relaunches = 1; RestoreInGame = $true; CachedFolder = $SloMo; CachedFrom = 'modio'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
+                     @{ step = 'expectUnavailable'; folder = $Dummy }, @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 300 },
+                     @{ step = 'expectRejoined'; timeout = 300 }, @{ step = 'expectModFolder'; folder = $SloMo; present = $true },
+                     @{ step = 'expectModFolder'; folder = 'TrueZeroEffort'; present = $false }, @{ step = 'expectUnavailable'; folder = $Dummy },
+                     @{ step = 'expectCachedModio'; folder = $SloMo; platform = 'android' }, @{ step = 'modioDownload'; id = $FasciaId; timeout = 300 },
+                     @{ step = 'expectCachedModio'; folder = 'Fascia'; platform = 'android' }, @{ step = 'expectProfileActive'; active = $false }, @{ step = 'quit' })
+        Expect   = @{ reports = @('needs_setup', 'ready'); notServed = @($SloMo, $Dummy); greetings = 1; sendQuestIds = @{ $SloMo = $SloMoId; $Dummy = -1 }; lingerSec = 10 }
+    }
 }
 
 function Note([string]$text) { Write-Host ("[{0:HH:mm:ss}] {1}" -f (Get-Date), $text) }
@@ -165,7 +205,10 @@ function Copy-ModSet([string]$Target, [string[]]$Names, [string]$From = $BuildDi
     New-Item -ItemType Directory -Force -Path $amp | Out-Null
     Copy-Item -Path "$From\AMP.dll", "$From\AMP.pdb", "$From\Netamite*.dll", "$From\Newtonsoft.Json.dll" -Destination $amp
     Copy-Item -LiteralPath (Join-Path $Repo 'BS Files\manifest.json') -Destination $amp
-    foreach ($n in $Names) { Copy-Item -LiteralPath (Join-Path $Fixtures $n) -Destination (Join-Path $Target $n) -Recurse }
+    foreach ($n in $Names) {
+        $src, $dst = if ($n.Contains('>')) { $n -split '>', 2 } else { $n, $n }
+        Copy-Item -LiteralPath (Join-Path $Fixtures $src) -Destination (Join-Path $Target $dst) -Recurse
+    }
 }
 
 # Waits for AMP's swap helper (a powershell started through WMI, so not our child) that works on this run's cache, then stops it if it hangs
@@ -211,6 +254,7 @@ function Invoke-Scenario([string]$Name) {
     $botMods = Join-Path $run 'bot-mods'
     if ($s.BotMode -ne 'none') { Copy-ModSet $botMods $s.BotMods }
     if ($s.BotExtraFile) { Set-Content -LiteralPath (Join-Path $botMods $s.BotExtraFile) -Encoding ascii -Value 'AMP e2e: this copy differs from the mod.io file' }
+    if ($s.BotSetup) { & $s.BotSetup $botMods }
     Note "run folder $run"
 
     $games = New-Object System.Collections.Generic.List[object]   # @{ proc; log; redirected } in start order
@@ -219,6 +263,7 @@ function Invoke-Scenario([string]$Name) {
     & 'C:\Projects\bns-mp\gametest\mods-aside.ps1' | ForEach-Object { Note $_ }
     try {
         Copy-ModSet $ModsDir $s.GameMods $(if ($s.AmpBuild) { $s.AmpBuild } else { $BuildDir })
+        if ($s.GameSetup) { & $s.GameSetup $ModsDir }
         $staged = @(Get-ModsShape $ModsDir)
 
         $botArgs = if ($s.BotMode -eq 'host') { "--host $Port" } else { "--join 127.0.0.1 $Port" }
@@ -232,6 +277,8 @@ function Invoke-Scenario([string]$Name) {
         $gameArgs = '--doorstop-enabled', 'true', '--doorstop-target-assembly', 'AmpTestBoot\AmpTestBoot.dll', '-amp-test-docs', $docs,
                     '-vrmode', 'mockhmd', '-skipintro', '-skipmodswarning', '-screen-fullscreen', '0', '-screen-width', '640', '-screen-height', '360',
                     '-force-d3d11', '-level', 'Home', '-charindex', '0', '-logFile', $log, '-amp-autopilot', $script
+        if ($s.GameArgs) { $gameArgs += $s.GameArgs }
+        $relaunched = 0
         $t0 = Get-Date
         & $Steam -applaunch 629730 @gameArgs
         Note 'launched through Steam'
@@ -283,6 +330,14 @@ function Invoke-Scenario([string]$Name) {
             $g.proc.Refresh()
             if ($g.proc.HasExited) {
                 if (-not $exitedAt) { $exitedAt = Get-Date; Note "game pid $($g.proc.Id) exited ($($g.proc.ExitCode)), waiting for a relaunch" }
+                # The game closed for a restart it can't do itself (Quest flow): start it again with the same arguments, like the player would
+                $restarts = @($seen.Keys | Where-Object { $_ -match '\(closing for the restart\)' }).Count
+                if ($relaunched -lt $s.Relaunches -and $restarts -gt $relaunched -and ((Get-Date) - $exitedAt).TotalSeconds -gt 5 -and -not (Get-Process BladeAndSorcery -ErrorAction SilentlyContinue)) {
+                    $relaunched++
+                    & $Steam -applaunch 629730 @gameArgs
+                    $events.Add("runner relaunched the game through Steam (+$([int]((Get-Date) - $t0).TotalSeconds)s)")
+                    Note 'relaunched through Steam (standing in for the player)'
+                }
                 elseif (((Get-Date) - $exitedAt).TotalSeconds -gt 180) { $result.reason = "game exited (code $($g.proc.ExitCode)) without AMPTEST DONE/FAIL and wasn't relaunched"; break }
             }
             if ($bot -and $bot.HasExited -and $bot.ExitCode -ne 0) { $result.reason = 'bot failed before the game finished'; break }
@@ -314,10 +369,10 @@ function Invoke-Scenario([string]$Name) {
             if (-not ($version -eq $s.ExpectAmpAfter -and $oldSame) -and -not $result.reason) { $result.reason = "after the update Mods has AMP $version, old build kept=$oldSame" }
         }
 
-        if ($s.WaitRestore) {
-            # Temporary swap: the restore helper starts when the game quits and puts the staged set back
+        if ($s.WaitRestore -or $s.RestoreInGame) {
+            # Temporary swap: the restore helper starts when the game quits and puts the staged set back (or the game did it while quitting)
             $helperLog = Join-Path $CacheDir 'helper\helper.log'
-            $until = (Get-Date).AddSeconds(180); $restored = $false
+            $until = (Get-Date).AddSeconds($(if ($s.RestoreInGame) { 0 } else { 180 })); $restored = [bool]$s.RestoreInGame
             while ((Get-Date) -lt $until) {
                 $hl = Read-Shared $helperLog
                 if ($hl) {

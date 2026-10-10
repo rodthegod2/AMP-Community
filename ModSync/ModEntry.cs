@@ -11,5 +11,8 @@ namespace AMP.ModSync {
         public long   sizeBytes;
         public bool   enabled;    // the game skips folders starting with "_"
         public bool   isAmp;      // the multiplayer mod itself
+        // Host -> joiner only (appended in 1.1.0, older builds ignore it / send 0): the mod.io mod a Quest player gets for this mod.
+        // > 0: that mod.io id has a live Android/Oculus file; -1: the host checked, there is no Quest version; 0: unknown (older host)
+        public long   questModioId;
     }
 }

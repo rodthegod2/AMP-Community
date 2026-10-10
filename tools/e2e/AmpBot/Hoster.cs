@@ -56,6 +56,10 @@ namespace AmpBot {
 
             List<ModEntry> mods = ModInventory.Scan(modsFolder, cacheFolder, true);
             hostMods = mods.Where(m => m.enabled).ToList();
+            foreach(ModEntry mod in hostMods) {
+                long questId;
+                if(x.sendQuestIds.TryGetValue(mod.folder, out questId)) mod.questModioId = questId;
+            }
             ModEntry amp = mods.FirstOrDefault(m => m.isAmp && m.enabled);
             hostModSetJson = JsonConvert.SerializeObject(new HostModSet {
                 platform  = "windows",
@@ -74,7 +78,7 @@ namespace AmpBot {
                 Out.Info("spawning " + x.playItem + " as item " + id);
                 SendToPlaying(botItem);
             };
-            Out.Info("hosting " + hostMods.Count + " mods: " + string.Join(", ", hostMods.Select(m => m.folder)));
+            Out.Info("hosting " + hostMods.Count + " mods: " + string.Join(", ", hostMods.Select(m => m.folder + (m.questModioId != 0 ? " (Quest: " + m.questModioId + ")" : ""))));
         }
 
         public void Start() {

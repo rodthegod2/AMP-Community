@@ -116,6 +116,13 @@ namespace AMP.ModSync {
             }
         }
 
+        // A download of exactly this mod.io file that is still in the cache (cross-platform downloads have no host hash to look up)
+        public CacheEntry FindModioFile(long modioId, long modioFileId) {
+            if(modioId <= 0 || modioFileId <= 0 || !Directory.Exists(ModsRoot)) return null;
+            return Directory.GetDirectories(ModsRoot).Select(d => Find(Path.GetFileName(d)))
+                            .FirstOrDefault(e => e != null && e.modioId == modioId && e.modioFileId == modioFileId);
+        }
+
         public void Touch(string hash) {
             CacheEntry entry = Find(hash);
             if(entry == null) return;
