@@ -51,8 +51,8 @@ PY
 
 (cd dist && sha256sum "$ZIP" > SHA256SUMS.txt)
 
-cat > dist/RELEASE_NOTES.md <<NOTES
-# AMP Community $VERSION
+cat > dist/RELEASE_NOTES.md <<'NOTES'
+# AMP Community @VERSION@
 
 A community fork of AMP (Adammantium Multiplayer Mod) for Blade & Sorcery.
 
@@ -67,9 +67,9 @@ A community fork of AMP (Adammantium Multiplayer Mod) for Blade & Sorcery.
 - **In-game updater**: AMP checks this releases page at startup; press "Update AMP" in the book when a newer version exists
 
 ## Install
-1. Download \`$ZIP\` below (check it against \`SHA256SUMS.txt\` if you like).
-2. Unzip it and copy the \`MultiplayerMod\` folder into \`<Steam>\steamapps\common\Blade & Sorcery\BladeAndSorcery_Data\StreamingAssets\Mods\\` (remove any other AMP copy first).
-3. Everyone who plays together needs this same build. Read \`HOW-TO-PLAY.txt\` (in the zip) for hosting and joining.
+1. Download `@ZIP@` below (check it against `SHA256SUMS.txt` if you like).
+2. Unzip it and copy the `MultiplayerMod` folder into `<Steam>\steamapps\common\Blade & Sorcery\BladeAndSorcery_Data\StreamingAssets\Mods\` (remove any other AMP copy first).
+3. Everyone who plays together needs this same build. Read `HOW-TO-PLAY.txt` (in the zip) for hosting and joining.
 
 ## Known limitations
 - Not yet tested in VR by the maintainers.
@@ -81,6 +81,7 @@ A community fork of AMP (Adammantium Multiplayer Mod) for Blade & Sorcery.
 - **Netamite** by Adammantium (a modified copy is included; credited, no license file is published upstream)
 - Upstream contributors, including misterbubb, LJPCODESTUDIO and others in the git history
 NOTES
+sed -i -e "s/@VERSION@/$VERSION/g" -e "s/@ZIP@/$ZIP/g" dist/RELEASE_NOTES.md
 
 echo
 echo "Staged in dist/:"
