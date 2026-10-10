@@ -22,6 +22,8 @@ $SavesSrc  = 'C:\Projects\bns-mp\gametest\saves-backup\BladeAndSorcery\Saves\Def
 $Base      = @('InstantSloMo', '_TrueZeroEffort', 'Fascia')
 $Dummy     = 'AmpE2EDummy'
 $OldBuild  = 'C:\Projects\bns-mp\build-0.9.9'              # this code built as community version 0.9.9, for the self-update scenario
+$Release100 = 'C:\Projects\bns-mp\build-1.0.0'            # the published v1.0.0 release (what players have), for self-update-from-1.0.0
+$ReleaseRepo = 'rodthegod2/AMP-Community'
 $PvP       = @{ mod = 'MultiplayerMod'; option = 'PvP' }
 $SloMo     = 'InstantSloMo'                                  # fixture copy of the mod.io mod 2512544 (tiny, JSON only)
 $SloMoId   = 2512544
@@ -79,10 +81,20 @@ $Scenarios = [ordered]@{
         Expect   = @{ reports = @('ready'); greetings = 1; play = $true; playItem = 'SwordShortCommon'; seePlayers = 1; seePlayerMoves = 3; seeItems = @('DaggerCommon'); seeItemMoves = 3; lingerSec = 15 }
     }
     'self-update' = @{
-        # A 0.9.9 build finds the published release on GitHub, downloads it (redirects to the asset host), swaps itself and relaunches
-        GameMods = $Base; BotMode = 'none'; AmpBuild = $OldBuild; ExpectAmpAfter = '1.0.0'
+        # A 0.9.9 build finds the latest published release on GitHub, downloads it (redirects to the asset host), swaps itself and relaunches.
+        # 'latest' is resolved from GitHub when the scenario starts (the version bump of a release doesn't break this scenario).
+        GameMods = $Base; BotMode = 'none'; AmpBuild = $OldBuild; ExpectAmpAfter = 'latest'
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'expectAmpVersion'; version = '0.9.9' }, @{ step = 'updateAmp'; timeout = 300 },
-                     @{ step = 'expectAmpVersion'; version = '1.0.0' }, @{ step = 'quit' })
+                     @{ step = 'expectAmpVersion'; version = 'latest' }, @{ step = 'quit' })
+        Expect   = @{}
+    }
+    'self-update-from-1.0.0' = @{
+        # What players of the first release see: the published v1.0.0 build (checked against its SHA256SUMS) updates itself to the latest release.
+        # Skipped while 1.0.0 is the latest release.
+        GameMods = $Base; BotMode = 'none'; AmpBuild = $Release100; ExpectAmpAfter = 'latest'
+        Skip     = { if ([version](Get-LatestRelease) -le [version]'1.0.0') { 'the latest release is still 1.0.0' } }
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'expectAmpVersion'; version = '1.0.0' }, @{ step = 'updateAmp'; timeout = 300 },
+                     @{ step = 'expectAmpVersion'; version = 'latest' }, @{ step = 'quit' })
         Expect   = @{}
     }
     'modio-probe' = @{
@@ -132,7 +144,8 @@ $Scenarios = [ordered]@{
                      @{ step = 'expectMatch'; folder = 'Fascia'; modioId = $FasciaId }, @{ step = 'expectMatch'; folder = $SloMo; modioId = $SloMoId },
                      @{ step = 'expectMatch'; folder = 'TrueZeroEffort'; modioId = $ZeroEffortId; confirm = $true }, @{ step = 'expectMatch'; folder = $Dummy; modioId = 0 },
                      @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 5 }, @{ step = 'quit' })
-        Expect   = @{ platform = 'android'; questIds = @{ $SloMo = $SloMoId; 'Fascia' = $FasciaId; $Dummy = -1 }; greeted = $true }
+        # questResend: the bot connects while mod.io is still being asked, gets the list marked "pending" and must get it again, complete
+        Expect   = @{ platform = 'android'; questIds = @{ $SloMo = $SloMoId; 'Fascia' = $FasciaId; $Dummy = -1 }; questResend = $true; greeted = $true }
     }
     'join-quest-sim' = @{
         # The game is a Quest player (-amp-simulate-platform android) joining a PC host. The host's InstantSloMo has no id.modio (as if from Nexus)
@@ -151,9 +164,53 @@ $Scenarios = [ordered]@{
                      @{ step = 'expectCachedModio'; folder = 'Fascia'; platform = 'android' }, @{ step = 'expectProfileActive'; active = $false }, @{ step = 'quit' })
         Expect   = @{ reports = @('needs_setup', 'ready'); notServed = @($SloMo, $Dummy); greetings = 1; sendQuestIds = @{ $SloMo = $SloMoId; $Dummy = -1 }; lingerSec = 10 }
     }
+    'join-quest-sim-killed' = @{
+        # As join-quest-sim, but the session ends like Android may end an app: the process dies, no quit event, so the in-game restore on
+        # quit never runs. The next start must undo the swap in-game and close by itself (its catalogs came from the swapped folders);
+        # the runner starts the game both times like the player would. Afterwards Mods is the staged set again.
+        GameMods = @('_TrueZeroEffort>TrueZeroEffort'); BotMods = @($SloMo, $Dummy); BotMode = 'host'
+        BotSetup = { param($mods) Remove-Item -LiteralPath (Join-Path $mods "$SloMo\id.modio") }
+        GameArgs = @('-amp-simulate-platform', 'android'); Relaunches = 2; RestoreInGame = $true; CachedFolder = $SloMo; CachedFrom = 'modio'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
+                     @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 300 }, @{ step = 'expectRejoined'; timeout = 300 },
+                     @{ step = 'expectModFolder'; folder = $SloMo; present = $true }, @{ step = 'killGame' },
+                     @{ step = 'expectStartupRestore'; folder = $SloMo; timeout = 300 }, @{ step = 'quit' })
+        Expect   = @{ reports = @('needs_setup', 'ready'); notServed = @($SloMo, $Dummy); greetings = 1; lingerSec = 10 }
+    }
 }
 
 function Note([string]$text) { Write-Host ("[{0:HH:mm:ss}] {1}" -f (Get-Date), $text) }
+
+# The version of the latest published release (what the in-game updater finds), asked once per runner
+$script:latestRelease = $null
+function Get-LatestRelease {
+    if (-not $script:latestRelease) {
+        $r = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'AMP-e2e' } -TimeoutSec 30
+        $script:latestRelease = $r.tag_name.TrimStart('v')
+        if ($script:latestRelease -notmatch '^\d+(\.\d+){1,3}$') { throw "unexpected latest release tag $($r.tag_name)" }
+    }
+    $script:latestRelease
+}
+
+# The published v1.0.0 build in $Release100: downloaded from our own GitHub release once and checked against the release's SHA256SUMS
+function Get-Release100 {
+    if (Test-Path -LiteralPath (Join-Path $Release100 'AMP.dll')) { return }
+    Note "fetching the v1.0.0 release into $Release100"
+    $tmp = Join-Path $RunsRoot 'release-1.0.0-download'
+    if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $base = "https://github.com/$ReleaseRepo/releases/download/v1.0.0"
+    Invoke-WebRequest -Uri "$base/AMP-Community-1.0.0.zip" -OutFile (Join-Path $tmp 'AMP-Community-1.0.0.zip') -UseBasicParsing -TimeoutSec 120
+    Invoke-WebRequest -Uri "$base/SHA256SUMS.txt" -OutFile (Join-Path $tmp 'SHA256SUMS.txt') -UseBasicParsing -TimeoutSec 60
+    $expected = ((Get-Content -LiteralPath (Join-Path $tmp 'SHA256SUMS.txt') | Where-Object { $_ -match 'AMP-Community-1\.0\.0\.zip' }) -split '\s+')[0]
+    $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $tmp 'AMP-Community-1.0.0.zip')).Hash
+    if (-not $expected -or $actual -ne $expected.ToUpperInvariant()) { throw "v1.0.0 zip hash $actual doesn't match SHA256SUMS ($expected)" }
+    Expand-Archive -LiteralPath (Join-Path $tmp 'AMP-Community-1.0.0.zip') -DestinationPath (Join-Path $tmp 'x')
+    New-Item -ItemType Directory -Force -Path $Release100 | Out-Null
+    Copy-Item -Path (Join-Path $tmp 'x\MultiplayerMod\*') -Destination $Release100
+    Remove-Item -LiteralPath $tmp -Recurse -Force
+    Note "  v1.0.0 verified ($actual)"
+}
 
 # Unity keeps its log open; read it without locking it
 function Read-Shared([string]$Path) {
@@ -204,7 +261,8 @@ function Copy-ModSet([string]$Target, [string[]]$Names, [string]$From = $BuildDi
     $amp = Join-Path $Target 'MultiplayerMod'
     New-Item -ItemType Directory -Force -Path $amp | Out-Null
     Copy-Item -Path "$From\AMP.dll", "$From\AMP.pdb", "$From\Netamite*.dll", "$From\Newtonsoft.Json.dll" -Destination $amp
-    Copy-Item -LiteralPath (Join-Path $Repo 'BS Files\manifest.json') -Destination $amp
+    $manifest = if (Test-Path -LiteralPath (Join-Path $From 'manifest.json')) { Join-Path $From 'manifest.json' } else { Join-Path $Repo 'BS Files\manifest.json' }
+    Copy-Item -LiteralPath $manifest -Destination $amp
     foreach ($n in $Names) {
         $src, $dst = if ($n.Contains('>')) { $n -split '>', 2 } else { $n, $n }
         Copy-Item -LiteralPath (Join-Path $Fixtures $src) -Destination (Join-Path $Target $dst) -Recurse
@@ -228,6 +286,19 @@ function Invoke-Scenario([string]$Name) {
     if (-not $s) { throw "unknown scenario $Name (known: $($Scenarios.Keys -join ', '))" }
     $result = [ordered]@{ scenario = $Name; status = 'FAIL'; reason = ''; seconds = 0; timings = '' }
     $started = Get-Date
+    if ($s.Skip) {
+        $why = & $s.Skip
+        if ($why) { Note "E2E $Name SKIP - $why"; $result.status = 'SKIP'; $result.reason = $why; return [pscustomobject]$result }
+    }
+    if ($s.AmpBuild -eq $Release100) { Get-Release100 }
+    # 'latest': the version of the latest GitHub release, in the expected version and in expectAmpVersion steps
+    if ($s.ExpectAmpAfter -eq 'latest' -or @($s.Script | Where-Object { $_.version -eq 'latest' }).Count -gt 0) {
+        $latest = Get-LatestRelease
+        Note "latest release on GitHub: $latest"
+        $s = $s.Clone()
+        if ($s.ExpectAmpAfter -eq 'latest') { $s.ExpectAmpAfter = $latest }
+        $s.Script = @($s.Script | ForEach-Object { $c = $_.Clone(); if ($c.version -eq 'latest') { $c.version = $latest }; $c })
+    }
 
     # Preconditions: nothing may be running or left over from an earlier run
     if (Get-Process BladeAndSorcery -ErrorAction SilentlyContinue) { throw 'a BladeAndSorcery process is already running' }
@@ -442,4 +513,4 @@ $names = if ($All) { @($Scenarios.Keys) } else { @($Scenario) }
 $results = foreach ($n in $names) { Invoke-Scenario $n }
 $results | Format-Table scenario, status, seconds, reason -AutoSize | Out-String -Width 250 | Write-Host
 $results | ForEach-Object { Write-Host "$($_.scenario) timings: $($_.timings)" }
-if ($results | Where-Object { $_.status -ne 'PASS' }) { exit 1 }
+if ($results | Where-Object { $_.status -notin 'PASS', 'SKIP' }) { exit 1 }

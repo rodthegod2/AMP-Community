@@ -65,6 +65,8 @@ A community fork of AMP (Adammantium Multiplayer Mod) for Blade & Sorcery.
 - **Live settings sync**: gameplay Mod Options follow the host's values while connected
 - **AMP self-update**: AMP is brought in line with the host's build the same way
 - **In-game updater**: AMP checks this releases page at startup; press "Update AMP" in the book when a newer version exists
+- **mod.io delivery** (1.1.0): mods the host got from mod.io come straight from mod.io when it still has the host's version
+- **Quest (experimental, 1.1.0)**: a PC host looks up Quest versions of its mods on mod.io (Nexus mods by name, asking the host when unsure); Quest players download those from mod.io, install them in-game and restart (see HOW-TO-PLAY.txt, section 8)
 
 ## Install
 1. Download `@ZIP@` below (check it against `SHA256SUMS.txt` if you like).
@@ -73,7 +75,7 @@ A community fork of AMP (Adammantium Multiplayer Mod) for Blade & Sorcery.
 
 ## Known limitations
 - Not yet tested in VR by the maintainers.
-- Quest is not supported yet (coming in a later version).
+- Quest support is experimental and not yet tested on a headset (install path and in-game swap unverified there).
 - Mod sync and settings sync require the host to run this build with "Host on PC".
 
 ## Credits

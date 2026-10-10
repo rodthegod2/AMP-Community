@@ -20,6 +20,7 @@ namespace AMP.ModSync {
     internal static class ModioClient {
         internal const int SearchPageSize = 20;
         private const float StallSeconds = 60f; // a download whose progress doesn't move for this long is given up
+        private const float CancelSeconds = 30f; // how long a cancelled download may take to stop writing before it is abandoned
 
         internal class DownloadResult {
             internal string error;  // null on success
@@ -29,6 +30,16 @@ namespace AMP.ModSync {
             internal string fileName = "";
             internal string version  = "";
             internal bool   cached;  // alreadyCached said yes for this file: nothing was downloaded (folder and root are null)
+            internal bool   unavailable; // with error: mod.io has no file of this mod for this platform, or the mod is gone (not worth retrying)
+        }
+
+        // A mod.io mod as this platform would download it (LookUpForThisPlatform)
+        internal class PlatformFile {
+            internal string error;       // null on success
+            internal bool   unavailable; // with error: no file for this platform, or the mod is gone
+            internal string title = "";
+            internal long   fileId;
+            internal long   bytes;
         }
 
         private static bool isolatedForTest;
@@ -42,6 +53,8 @@ namespace AMP.ModSync {
                     if(ModIOUnity.IsInitialized()) return "mod.io was initialised before its data folders could be isolated for the test";
                     string problem = IsolateDataFolders(Path.Combine(isolated.ToString(), "modio"));
                     if(problem != null) return "can't isolate mod.io's data folders for the test: " + problem;
+                    problem = VerifyIsolation(Path.Combine(isolated.ToString(), "modio"));
+                    if(problem != null) return "mod.io's data folders are not isolated for the test, not initialising: " + problem;
                     isolatedForTest = true;
                 }
                 if(ModIOUnity.IsInitialized()) return null;
@@ -52,8 +65,7 @@ namespace AMP.ModSync {
                 if(!result.Succeeded()) return "mod.io didn't initialise: " + Describe(result);
                 if(isolatedForTest) {
                     string root = UserDataRoot();
-                    if(root == null || !root.Replace('\\', '/').StartsWith(Path.Combine(isolated.ToString(), "modio").Replace('\\', '/'), StringComparison.OrdinalIgnoreCase))
-                        return "mod.io's user data isn't in the isolated folder: " + root;
+                    if(!IsInside(root, Path.Combine(isolated.ToString(), "modio"))) return "mod.io's user data isn't in the isolated folder: " + root;
                     Debug.Log("[AMP] mod.io: initialised for the test, user data in " + root);
                 }
                 return null;
@@ -85,6 +97,38 @@ namespace AMP.ModSync {
             return null;
         }
 
+        // Before InitializeForUser touches anything: every redirected field reads back inside the isolated folder, and the plugin's own compiled
+        // code builds its paths from the new values (a fresh SystemIODataService's temp init only computes a path, it writes nothing; an
+        // inlined copy of an old value would show up here). Null when isolated.
+        private static string VerifyIsolation(string root) {
+            Type service = typeof(ModIOUnity).Assembly.GetType("ModIO.Implementation.Platform.SystemIODataService");
+            if(service == null) return "SystemIODataService not found";
+            foreach(string name in new[] { "PersistentDataRootDirectory", "UserRootDirectory", "GlobalSettingsFilePath", "TempRootDirectory" }) {
+                string value = service.GetField(name, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(null) as string;
+                if(!IsInside(value, root)) return name + " is " + (value ?? "unknown");
+            }
+            try {
+                object probe = Activator.CreateInstance(service, true);
+                Type temp = typeof(ModIOUnity).Assembly.GetType("ModIO.Implementation.Platform.ITempDataService");
+                MethodInfo init = temp?.GetMethod("Initialize");
+                if(init == null) return "ITempDataService.Initialize not found";
+                object[] arguments = init.GetParameters().Select(p => p.ParameterType == typeof(long) ? (object) 3852L
+                                                                    : p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null).ToArray();
+                init.Invoke(probe, arguments);
+                string built = service.GetProperty("RootDirectory")?.GetValue(probe, null) as string;
+                if(!IsInside(built, root)) return "the plugin builds its temp folder as " + (built ?? "unknown");
+            } catch(Exception e) {
+                return "the plugin's paths couldn't be checked: " + e.GetBaseException().Message;
+            }
+            return null;
+        }
+
+        private static bool IsInside(string path, string root) {
+            if(string.IsNullOrEmpty(path)) return false;
+            string a = path.Replace('\\', '/').TrimEnd('/'), b = root.Replace('\\', '/').TrimEnd('/');
+            return a.Equals(b, StringComparison.OrdinalIgnoreCase) || a.StartsWith(b + "/", StringComparison.OrdinalIgnoreCase);
+        }
+
         // Where the initialised plugin keeps the user's data (DataStorage.user.RootDirectory), null if unknown
         private static string UserDataRoot() {
             Type storage = typeof(ModIOUnity).Assembly.GetType("ModIO.Implementation.DataStorage");
@@ -97,14 +141,61 @@ namespace AMP.ModSync {
         }
 
         internal static void GetMod(long id, Action<ModProfile?, string> done) {
+            GetMod(id, false, (p, e, gone) => done(p, e));
+        }
+
+        // fresh: asks mod.io even when the plugin has this mod in its response cache (kept about a minute, maybe from another platform's
+        // request). gone: the error says the mod doesn't exist (any more), see ModioRules.IsGone.
+        internal static void GetMod(long id, bool fresh, Action<ModProfile?, string, bool> done) {
             string problem = EnsureInitialized();
-            if(problem != null) { Dispatcher.Enqueue(() => done(null, problem)); return; }
+            if(problem != null) { Dispatcher.Enqueue(() => done(null, problem, false)); return; }
+            if(fresh) ForgetCached(id);
             ModIOUnity.GetMod(new ModId(id), r => {
                 bool ok = r != null && r.result.Succeeded();
                 ModProfile? profile = ok ? r.value : (ModProfile?) null;
                 string error = ok ? null : (r == null ? "no answer" : Describe(r.result));
-                Dispatcher.Enqueue(() => done(profile, error));
+                bool gone = !ok && r != null && ModioRules.IsGone(r.result.errorCode, r.result.apiCode);
+                Dispatcher.Enqueue(() => done(profile, error, gone));
             });
+        }
+
+        // The plugin's ResponseCache.ClearModFromCache (internal). If it can't be found the cached answer is used, which is only ever a minute old.
+        private static void ForgetCached(long id) {
+            try {
+                MethodInfo clear = typeof(ModIOUnity).Assembly.GetType("ModIO.Implementation.API.ResponseCache")
+                                   ?.GetMethod("ClearModFromCache", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if(clear != null) clear.Invoke(null, new object[] { new ModId(id) });
+                else Log.Warn(Defines.CLIENT, "mod.io: ResponseCache.ClearModFromCache not found, using the plugin's cached answer.");
+            } catch(Exception e) {
+                Log.Warn(Defines.CLIENT, "mod.io: couldn't clear the cached answer for " + id + ". " + e.GetBaseException().Message);
+            }
+        }
+
+        // Coroutine: what this platform would download for the mod (title, live file and its size), asked fresh. done always gets a result.
+        internal static IEnumerator LookUpForThisPlatform(long id, Action<PlatformFile> done) {
+            string previousHeader = ModSyncPaths.Simulated ? SetPlatformHeader(ModSyncPaths.Platform) : null;
+            var result = new PlatformFile();
+            try {
+                ModProfile? profile = null;
+                string error = null;
+                bool answered = false, gone = false;
+                GetMod(id, true, (p, e, g) => { profile = p; error = e; gone = g; answered = true; });
+                float askedAt = Time.realtimeSinceStartup;
+                while(!answered && Time.realtimeSinceStartup - askedAt < StallSeconds) yield return null;
+                if(!answered) error = "no answer in " + StallSeconds + " s";
+                if(error != null) {
+                    result.error = gone ? "mod.io doesn't have mod " + id + " (any more): " + error : error;
+                    result.unavailable = gone;
+                } else {
+                    result.title  = profile.Value.name ?? "";
+                    result.fileId = profile.Value.modfile.id;
+                    result.bytes  = profile.Value.modfile.filesize;
+                    if(result.fileId <= 0) { result.error = "mod " + id + " has no file for this platform on mod.io"; result.unavailable = true; }
+                }
+            } finally {
+                if(previousHeader != null) SetPlatformHeader(previousHeader);
+            }
+            done(result);
         }
 
         // First page (SearchFilter page size 20) of a full-text search, as mod.io orders it
@@ -156,21 +247,22 @@ namespace AMP.ModSync {
         private static IEnumerator DownloadFile(long id, ModCache cache, long maxBytes, Action<float> progress, Func<bool> stillWanted, Action<DownloadResult> done, Func<long, bool> alreadyCached) {
             var result = new DownloadResult();
 
+            // Fresh, not the plugin's cached answer: the live file decides whether the cached copy is still current, and its size the limit
             ModProfile? profile = null;
             string error = null;
-            bool answered = false;
-            GetMod(id, (p, e) => { profile = p; error = e; answered = true; });
+            bool answered = false, gone = false;
+            GetMod(id, true, (p, e, g) => { profile = p; error = e; gone = g; answered = true; });
             float askedAt = Time.realtimeSinceStartup;
             while(!answered && Time.realtimeSinceStartup - askedAt < StallSeconds) yield return null;
             if(!stillWanted()) yield break;
             if(!answered) error = "no answer in " + StallSeconds + " s";
-            if(error != null) { result.error = "mod.io doesn't have mod " + id + ": " + error; done(result); yield break; }
+            if(error != null) { result.error = "mod.io doesn't have mod " + id + ": " + error; result.unavailable = gone; done(result); yield break; }
 
             ModIO.Implementation.API.Objects.Modfile file = profile.Value.modfile;
             result.fileId   = file.id;
             result.fileName = file.filename ?? "";
             result.version  = file.version ?? "";
-            if(file.id <= 0) { result.error = "mod " + id + " has no file for this platform on mod.io"; done(result); yield break; }
+            if(file.id <= 0) { result.error = "mod " + id + " has no file for this platform on mod.io"; result.unavailable = true; done(result); yield break; }
             if(alreadyCached != null && alreadyCached(file.id)) { result.cached = true; done(result); yield break; }
             if(file.filesize > maxBytes) { result.error = "the mod.io file is larger than expected (" + file.filesize + " bytes)"; done(result); yield break; }
 
@@ -196,12 +288,28 @@ namespace AMP.ModSync {
                 if(Time.realtimeSinceStartup - movedAt > StallSeconds) { stalled = true; operation.Cancel(); break; }
                 yield return null;
             }
-            while(!operation.task.IsCompleted) yield return null; // a cancelled download still writes to the stream until its task ends
+            // A cancelled download still writes to the stream until its task ends; one that never ends (stuck asking for a link) is abandoned
+            float cancelledAt = Time.realtimeSinceStartup;
+            while(!operation.task.IsCompleted && Time.realtimeSinceStartup - cancelledAt < CancelSeconds) yield return null;
+            if(!operation.task.IsCompleted) {
+                zip.Dispose();
+                Log.Warn(Defines.CLIENT, "mod.io: the download of " + id + " didn't stop within " + CancelSeconds + " s, abandoned.");
+                if(!stillWanted()) { TryDelete(root); yield break; }
+                fail(stalled ? "the mod.io download stalled for " + StallSeconds + " s" : "the mod.io download didn't finish");
+                yield break;
+            }
             if(!stillWanted()) { zip.Dispose(); TryDelete(root); yield break; }
             if(stalled) { zip.Dispose(); fail("the mod.io download stalled for " + StallSeconds + " s"); yield break; }
             if(!operation.IsSucceeded) {
                 zip.Dispose();
                 fail("the mod.io download failed: " + (operation.FailedMessage ?? (operation.IsCompleted ? "unknown error" : "no download link")));
+                yield break;
+            }
+            // The file the operation really fetched (it asks mod.io itself): its size counts, not the one looked up before
+            ServedFile(operation, result);
+            if(zip.Length > maxBytes) {
+                zip.Dispose();
+                fail("the mod.io file is larger than expected (" + zip.Length + " bytes)");
                 yield break;
             }
 
@@ -210,8 +318,8 @@ namespace AMP.ModSync {
             Task<string> unpack = Task.Run(() => {
                 zip.Position = 0;
                 ReleasePackage.ExtractAll(zip, extracted, maxBytes);
-                // Never let an id.modio through: the game would treat the folder as a mod.io install of the player's
-                foreach(string idFile in Directory.GetFiles(extracted, "id.modio", SearchOption.AllDirectories)) File.Delete(idFile);
+                // Never let an id.modio (any spelling) through: the game would treat the folder as a mod.io install of the player's
+                ModInventory.StripModioIds(extracted);
                 return ReleasePackage.FindModFolder(extracted);
             });
             while(!unpack.IsCompleted) yield return null;
@@ -222,7 +330,6 @@ namespace AMP.ModSync {
             }
             result.root   = root;
             result.folder = unpack.Result;
-            ServedFile(operation, result);
             done(result);
         }
 

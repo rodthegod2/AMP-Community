@@ -46,6 +46,7 @@ namespace AmpBot {
             foreach(string folder in x.downloaded) list.Expect("downloaded " + folder);
             foreach(string file in x.files) list.Expect("file " + file);
             if(x.greeted) list.Expect("greeted");
+            if(x.questResend) list.Expect("questResend");
             foreach(OptionValue v in x.snapshot) list.Expect("snapshot " + v.mod + "/" + v.option + (string.IsNullOrEmpty(v.title) ? "" : "=" + v.title));
             foreach(OptionValue v in x.settingChanged) list.Expect("settingChanged " + v.mod + "/" + v.option + "=" + v.title);
             watch = new GameplayWatch(x, list);
@@ -177,12 +178,18 @@ namespace AmpBot {
             Out.Info("reported " + status);
         }
 
+        private bool questListPending; // the host sent a list while still looking up Quest versions
+
         private void OnHostModSet(string json) {
             HostModSet set = JsonConvert.DeserializeObject<HostModSet>(json);
             Out.Info("host mod set: " + set.mods.Count + " mods, mode " + set.mode + ", platform " + set.platform + ", AMP " + Short(set.ampBuild));
             Report(JoinerStatus.Checking, "");
+            Out.Info("questModioIds: " + string.Join(", ", set.mods.Select(m => m.folder + "=" + m.questModioId)) + (set.questPending ? " (still being looked up)" : ""));
+            // Like the game: a joiner on another platform waits for the list the host sends again once its Quest matching is done
+            if(set.WaitForQuestIds(x.platform)) { questListPending = true; Out.Info("waiting for the host's list with the Quest versions"); return; }
+            if(questListPending) list.Mark("questResend", "got the list again with the Quest versions");
 
-            Out.Info("questModioIds: " + string.Join(", ", set.mods.Select(m => m.folder + "=" + m.questModioId)));
+            Out.Info("questModioIds (final): " + string.Join(", ", set.mods.Select(m => m.folder + "=" + m.questModioId)));
             foreach(KeyValuePair<string, long> q in x.questIds) {
                 ModEntry mod = set.mods.FirstOrDefault(m => m.folder == q.Key);
                 if(mod != null && mod.questModioId == q.Value) list.Mark("questId " + q.Key + "=" + q.Value);

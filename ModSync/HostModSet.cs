@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace AMP.ModSync {
@@ -26,6 +27,14 @@ namespace AMP.ModSync {
         public List<ModEntry> mods         = new List<ModEntry>();
         public string[]       personalMods = new string[0];
         public string[]       loadOrder    = new string[0];
+        // Appended in 1.1.0: the host is still looking up Quest versions (questModioId) on mod.io. A joiner on another platform waits for
+        // the list the host sends again once that is done; same-platform joiners don't need them and go ahead.
+        public bool           questPending;
+
+        // Whether a joiner on this platform plans with this list or waits for the next one
+        public bool WaitForQuestIds(string joinerPlatform) {
+            return questPending && !string.Equals(platform, joinerPlatform, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     // Sent joiner -> host as JSON.

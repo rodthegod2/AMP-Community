@@ -16,6 +16,12 @@ namespace AMP.ModSync {
     }
 
     public static class ModioRules {
+        // mod.io's answer for a mod id that doesn't exist (any more): the API's error refs 15022 (not found) / 15023 (deleted), or HTTP 404.
+        // Anything else (network, rate limit, server trouble) may work next time.
+        public static bool IsGone(uint code, uint apiCode) {
+            return apiCode == 15022 || apiCode == 15023 || code == 404;
+        }
+
         public static ModioAvailability Availability(IEnumerable<KeyValuePair<string, long>> platformFiles) {
             var result = new ModioAvailability();
             if(platformFiles == null) return result;

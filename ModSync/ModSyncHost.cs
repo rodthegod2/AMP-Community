@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using ServerType = AMP.Network.Server.Server;
 
@@ -18,7 +19,7 @@ namespace AMP.ModSync {
         private const int SETUP_TIMEOUT_MS  = 30 * 60 * 1000; // time a joiner gets to look at / set up mods
         private const int CHECK_TIMEOUT_MS  = 15 * 60 * 1000; // time a joiner gets to scan its mods
         internal const int MAX_REPORT_PARTS = 10;             // a joiner's report is tiny, anything longer is not one
-        private const int MATCH_WAIT_MS     = 30 * 1000;      // how long a joiner's mod list waits for the Quest matching of a new hosting session
+        private const int MATCH_WAIT_MS     = 30 * 1000;      // how long a Quest joiner's updated mod list waits for the Quest matching of a new hosting session
 
         // ClientData.modSyncState; every change goes through Transition so concurrent packets and timers can't both win
         private const string WAITING = "waiting";
@@ -65,14 +66,17 @@ namespace AMP.ModSync {
                 mode         = mode,
                 personalMods = (ModManager.safeFile.hostingSettings.personalMods ?? new string[0]).Where(name => !string.IsNullOrWhiteSpace(name)).ToArray(),
             };
-            QuestMatcher.Begin();
+            // Quest matching: only a PC host maps its (Nexus) mods to mod.io pages with a Quest file
+            bool matchQuest = ModSyncPaths.Platform == "windows";
+            int matchGeneration = matchQuest ? QuestMatcher.Begin() : 0;
             hostModSet = Task.Run(() => {
                 List<ModEntry> mods = ModInventory.Scan(modsFolder, cacheFolder, true);
                 set.mods      = mods.Where(m => m.enabled).ToList();
                 if(generation == prepareGeneration) { // a scan of an earlier hosting session must not overwrite this one's list
                     HostModsFolder = modsFolder;
                     HostMods       = set.mods;
-                    Dispatcher.Enqueue(() => { if(generation == prepareGeneration) QuestMatcher.Run(set.mods); });
+                    // Run ignores a generation that StopHost (or a new hosting session) ended in the meantime
+                    if(matchQuest) Dispatcher.Enqueue(() => QuestMatcher.Run(set.mods, set.personalMods, matchGeneration));
                 }
                 set.loadOrder = ModInventory.ReadLoadOrder(modsFolder);
                 ModEntry amp  = mods.FirstOrDefault(m => m.isAmp && m.enabled);
@@ -83,9 +87,10 @@ namespace AMP.ModSync {
         }
 
         // Serialized per joiner: Quest matches found since hosting started (or confirmed by the host) are included
-        private static string HostModSetJson(HostModSet set) {
+        private static string HostModSetJson(HostModSet set, bool questPending) {
             lock(set) {
                 foreach(ModEntry mod in set.mods) mod.questModioId = QuestMatcher.QuestIdFor(mod.folder);
+                set.questPending = questPending;
                 return JsonConvert.SerializeObject(set);
             }
         }
@@ -106,22 +111,39 @@ namespace AMP.ModSync {
                     Greet(server, client, WAITING);
                     return;
                 }
-                // Right after hosting started mod.io is still being asked for Quest versions; a joiner gets the list once that is done (or soon anyway)
-                Task.WhenAny(QuestMatcher.PassDone, Task.Delay(MATCH_WAIT_MS)).ContinueWith(_ => SendHostModSet(server, client, t.Result, connectMode));
+                // Right away, also while mod.io is still being asked for Quest versions (the list says so): a joiner on another platform reports
+                // its platform with "checking" and gets the list again when that is done (OnPacket); PC joiners don't need them and don't wait
+                bool pending = QuestMatcher.Running;
+                if(pending) Interlocked.Exchange(ref client.modSyncQuestResend, 1);
+                SendHostModSet(server, client, t.Result, pending);
+                Task.Delay(REPORT_TIMEOUT_MS).ContinueWith(_ => OnReportTimeout(server, client, connectMode));
             });
         }
 
-        private static void SendHostModSet(ServerType server, ClientData client, HostModSet set, string connectMode) {
+        // The timeout after the first send (OnClientConnected) still decides what happens to a joiner this doesn't reach
+        private static void SendHostModSet(ServerType server, ClientData client, HostModSet set, bool questPending) {
             if(!IsConnected(server, client)) return;
             try {
-                foreach(ModSyncPacket packet in ModSyncPacket.Create(ModSyncPacket.HOST_MOD_SET, HostModSetJson(set))) {
+                foreach(ModSyncPacket packet in ModSyncPacket.Create(ModSyncPacket.HOST_MOD_SET, HostModSetJson(set, questPending))) {
                     server.netamiteServer.SendTo(client, packet);
                 }
             } catch(Exception e) {
-                // The timeout below still decides what happens to this joiner
                 Log.Err(Defines.SERVER, "Mod sync: couldn't send the mod list to " + client.ClientName + ". " + e.Message);
             }
-            Task.Delay(REPORT_TIMEOUT_MS).ContinueWith(_ => OnReportTimeout(server, client, connectMode));
+        }
+
+        // A joiner on another platform got the list before the Quest matching finished: it gets the list again once the matching is done
+        // (or after MATCH_WAIT_MS anyway), exactly once
+        private static void ResendWhenMatched(ServerType server, ClientData client, string platform) {
+            if(string.Equals(platform, ModSyncPaths.Platform, StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(platform)) return;
+            if(Interlocked.Exchange(ref client.modSyncQuestResend, 0) != 1) return;
+            Task<HostModSet> scan = hostModSet;
+            if(scan == null || !scan.IsCompleted || scan.IsFaulted) return;
+            Task.WhenAny(QuestMatcher.PassDone, Task.Delay(MATCH_WAIT_MS)).ContinueWith(_ => {
+                if(!IsSettingUp(client) || ModManager.serverInstance != server) return; // already let in, or gone
+                Log.Info(Defines.SERVER, $"Mod sync: sending {client.ClientName} ({platform}) the mod list with the Quest versions.");
+                SendHostModSet(server, client, scan.Result, false);
+            });
         }
 
         // Frees what a half-sent report of this client still occupies
@@ -165,6 +187,7 @@ namespace AMP.ModSync {
                     Log.Info(Defines.SERVER, $"Mod sync: {client.ClientName} joins with differences: {report.detail}");
                 }
             } else if(report.status == JoinerStatus.Checking) {
+                ResendWhenMatched(server, client, client.modSyncPlatform);
                 if(!Transition(client, CHECKING, WAITING)) return;
                 Task.Delay(CHECK_TIMEOUT_MS).ContinueWith(_ => OnCheckTimeout(server, client, mode));
             } else if(report.status == JoinerStatus.NeedsSetup) {

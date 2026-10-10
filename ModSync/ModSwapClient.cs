@@ -53,7 +53,31 @@ namespace AMP.ModSync {
             if(fetch.Any(s => s.hostMod == null || string.IsNullOrEmpty(s.hostMod.folder))) return false;
             if(ModSyncPaths.Platform == "windows") return samePlatform && fetch.All(s => !string.IsNullOrEmpty(s.hostMod.hash));
             if(!InGame || fetch.Any(s => s.hostMod.isAmp)) return false;
+            string host;
+            int port;
+            if(!RejoinAddress(out host, out port)) return false; // see CannotDownloadReason
             return fetch.All(s => s.source == "modio" ? s.modioId > 0 : samePlatform && !string.IsNullOrEmpty(s.hostMod.hash));
+        }
+
+        // Shown instead of the download buttons when the plan could be set up but not from this connection; null otherwise.
+        // Quest: the game can't reopen itself, and a start that doesn't reconnect undoes the swap again (a swap the player never got to use),
+        // so an in-game swap needs an address the next start can rejoin by itself.
+        internal static string CannotDownloadReason(SyncPlan plan) {
+            if(!InGame || plan == null || !plan.BlocksJoin || !ModSyncPaths.Available) return null;
+            string host;
+            int port;
+            if(RejoinAddress(out host, out port)) return null;
+            return "Setting up the host's mods needs a direct connection: join the host by IP address (Join > Direct (IP)) so the game can reconnect by itself after the restart.";
+        }
+
+        // Where the next start reconnects to; false when this connection can't be rejoined by address (Steam lobby, no port)
+        private static bool RejoinAddress(out string host, out int port) {
+            ClientType client = ModManager.clientInstance;
+            bool isIp = client != null && client.netclient is IPClient && ModManager.guiManager != null;
+            host = isIp ? ModManager.guiManager.join_ip : "";
+            port = 0;
+            if(isIp) int.TryParse(ModManager.guiManager.join_port, out port);
+            return isIp && JournalPlanner.CanRejoin(host, port);
         }
 
         // A new connection starts: nothing of a half-finished download may leak into it. The journal stays.
@@ -83,7 +107,7 @@ namespace AMP.ModSync {
 
             if(!string.Equals(set.platform, ModSyncPaths.Platform, StringComparison.OrdinalIgnoreCase)) {
                 // Another platform's host: every download is that mod's build for this platform from mod.io
-                ModManager.instance.StartCoroutine(FetchForThisPlatform(plan.Of(SyncAction.Add).ToList(), current, () => ApplyInGame(plan, set, mode)));
+                ModManager.instance.StartCoroutine(FetchForThisPlatform(plan, plan.Of(SyncAction.Add).ToList(), current, () => ApplyInGame(plan, set, mode)));
                 return;
             }
             List<ModEntry> mods = plan.Of(SyncAction.Replace).Concat(plan.Of(SyncAction.Add)).Select(s => s.hostMod).ToList();
@@ -94,11 +118,13 @@ namespace AMP.ModSync {
 
         // Cross-platform: the mod.io mod the host mapped each mod to, as this platform's file. It can't match the host's hash (another build),
         // so it is stored under its own hash (step.cacheHash) with its mod.io ids; a file already in the cache is not downloaded again.
-        // Any mod that can't be downloaded stops the whole setup (nothing has been changed yet).
-        private static IEnumerator FetchForThisPlatform(List<SyncStep> steps, int current, Action next) {
+        // A mod mod.io has no file for on this platform (or that is gone) becomes "not available" and the rest goes on; any other failure
+        // (network, storage) stops the whole setup (nothing has been changed yet). The cache is then trimmed like after a host transfer.
+        private static IEnumerator FetchForThisPlatform(SyncPlan plan, List<SyncStep> steps, int current, Action next) {
             var cache = new ModCache(ModSyncPaths.CacheFolder);
             long cacheBytes = Math.Max(0, ModManager.safeFile.modSettings.modCacheMaxMB) * 1024L * 1024L;
             long maxBytes = cacheBytes > 0 ? cacheBytes : 4096L * 1024 * 1024; // the host's size is another platform's build: only the cache limit applies
+            var unavailable = new List<string>();
             foreach(SyncStep step in steps) {
                 if(attempt != current) yield break;
                 string name = step.hostMod.name;
@@ -112,6 +138,12 @@ namespace AMP.ModSync {
                     () => attempt == current, r => download = r, fileId => (reused = cache.FindModioFile(modioId, fileId)) != null),
                     e => crashed = e.GetType().Name + ": " + e.Message);
                 if(attempt != current) yield break;
+                if(download != null && download.unavailable) {
+                    Log.Warn(Defines.CLIENT, "Mod sync: " + name + " (mod.io " + modioId + ") isn't available for " + ModSyncPaths.Platform + ": " + download.error);
+                    step.action = SyncAction.Unavailable;
+                    unavailable.Add(name);
+                    continue;
+                }
                 if(download == null || download.error != null) {
                     Fail("Couldn't download " + name + " from mod.io:\n" + (download == null ? crashed ?? "the download stopped" : download.error));
                     yield break;
@@ -134,7 +166,23 @@ namespace AMP.ModSync {
                 step.cacheHash = commit.Result.hash;
                 Log.Info(Defines.CLIENT, "Mod sync: " + name + " downloaded from mod.io " + modioId + ", file " + download.fileId + " (" + download.fileName + ", version " + download.version + ") for " + ModSyncPaths.Platform + ".");
             }
-            if(attempt == current) next();
+            if(attempt != current) yield break;
+
+            // The same cache limit as host transfers; this download's entries are never evicted
+            var keep = new HashSet<string>(steps.Where(s => s.action == SyncAction.Add && s.cacheHash != null).Select(s => s.cacheHash));
+            Task evict = Task.Run(() => cache.Evict(cacheBytes, keep));
+            while(!evict.IsCompleted) yield return null;
+            if(evict.IsFaulted) Log.Err(Defines.CLIENT, "Mod sync: cleaning the mod cache failed. " + evict.Exception.GetBaseException().Message);
+            if(attempt != current) yield break;
+
+            if(unavailable.Count > 0) ModSyncClient.ShowNotice("Not available for your platform on mod.io:\n" + string.Join(", ", unavailable));
+            if(!plan.BlocksJoin) {
+                // Nothing left to install: join with the warning, like a plan that only had unavailable mods
+                busy = false;
+                ModSyncClient.JoinWithoutSetup();
+                yield break;
+            }
+            next();
         }
 
         // Host mods that came from mod.io are downloaded from mod.io, one after the other. mod.io only serves a mod's latest file, so a download
@@ -202,20 +250,19 @@ namespace AMP.ModSync {
         }
 
         private static SwapJournal PlanJournal(SyncPlan plan, HostModSet set, SwapMode mode) {
-            ClientType client = ModManager.clientInstance;
-            bool isIp = client != null && client.netclient is IPClient;
-            string host = isIp ? ModManager.guiManager.join_ip : "";
+            string host;
             int port;
-            int.TryParse(ModManager.guiManager.join_port, out port);
-            string password = ModManager.joinPassword;
-
-            SwapJournal planned = JournalPlanner.Build(plan, set.loadOrder, host, port, password, mode);
-            planned.rejoinPending = isIp && port > 0; // a Steam lobby can't be rejoined by address: the player joins again by hand
+            bool canRejoin = RejoinAddress(out host, out port);
+            SwapJournal planned = JournalPlanner.Build(plan, set.loadOrder, host, port, ModManager.joinPassword, mode);
+            planned.rejoinPending = canRejoin; // a Steam lobby can't be rejoined by address: the player joins again by hand (PC only, see CanDownload)
             return planned;
         }
 
         private const float QuitDelay = 5f; // the player reads "start the game again" before it closes
         private static bool closingForRestart; // the game closes to load the swapped mods: OnQuit must not undo them
+
+        internal static bool ClosingForRestart { get; private set; } // Quest: the game closes by itself in a moment (tests)
+        internal static bool RestoredAtStartup { get; private set; } // Quest: this start undid a swap the last session left behind (tests)
 
         // Quest: the journal is applied right here (off the main thread, renames only), then the game closes; the next start rejoins.
         // Unverified on a headset: tested on PC with -amp-simulate-platform android and JSON-only mods (Application.Quit / quitting on Quest).
@@ -251,6 +298,7 @@ namespace AMP.ModSync {
 
         private static IEnumerator CloseForRestart(string text) {
             closingForRestart = true;
+            ClosingForRestart = true;
             Progress(text);
             ModSyncClient.ShowNotice(text);
             yield return new WaitForSecondsRealtime(QuitDelay);
@@ -339,47 +387,59 @@ namespace AMP.ModSync {
             ReportHelperLog();
             if(journal == null) return;
 
-            // AMP's own update finished: nothing to restore, so no helper on quit and no "Restore my mods"
-            if(journal.IsFinishedKeepOnly()) {
-                journal.state = SwapState.Restored;
-                Save(journal);
-                DeleteJournal();
-                return;
-            }
-
             // The helper may have died halfway: "Planned" with a touched op is not "nothing happened"
             if(journal.state == SwapState.Planned && journal.ops.Any(o => o.done || o.started)) {
                 journal.state = SwapState.RestorePending;
                 Save(journal);
             }
 
-            switch(journal.state) {
-                case SwapState.Planned:   // the helper never ran
-                case SwapState.Restored:  // done, nothing to remember
+            switch(JournalPlanner.OnStartup(journal, InGame)) {
+                case StartupAction.Forget: // the helper never ran, the swap is undone, or AMP's own update finished: nothing to remember
+                    if(journal.state == SwapState.Applied) { journal.state = SwapState.Restored; Save(journal); }
                     DeleteJournal();
                     break;
 
-                case SwapState.RestorePending:
+                case StartupAction.OfferRestore:
                     Notice(CanForget
                         ? "Your mods couldn't be restored automatically, twice.\nBook > Mods > AMP > Forget swap leaves the folders where they are."
                         : "Your mods couldn't be restored automatically.\nBook > Mods > AMP > Restore my mods.");
                     break;
 
-                case SwapState.Applied:
-                    if(journal.rejoinPending) {
-                        journal.rejoinPending = false;
-                        RejoinStarted = true;
-                        Save(journal);
-                        ModManager.instance.StartCoroutine(RejoinRoutine(journal.host, journal.port, journal.password));
-                    } else if(InGame) {
-                        // Quest: the last session ended without the restore on quit (Android may end an app without it). Unverified on a headset.
-                        bool restored = RestoreInGame();
-                        Notice(restored ? "Your own mods were put back after the last multiplayer session.\nRestart Blade & Sorcery to load them."
-                                        : "Your mods couldn't be restored automatically.\nBook > Mods > AMP > Restore my mods.");
-                    }
-                    // Temporary: restored on quit (OnQuit). A crash leaves Applied behind, "Restore my mods" handles it.
+                case StartupAction.Rejoin:
+                    journal.rejoinPending = false;
+                    RejoinStarted = true;
+                    Save(journal);
+                    ModManager.instance.StartCoroutine(RejoinRoutine(journal.host, journal.port, journal.password));
                     break;
+
+                case StartupAction.RestoreAndClose:
+                    // Quest: the last session ended without the restore on quit (Android may end an app without it), or a restore stopped halfway.
+                    // This start loaded the swapped folders, so once they are back the game must close to load the player's own mods.
+                    // Unverified on a headset.
+                    if(RestoreInGame()) {
+                        RestoredAtStartup = true;
+                        closingForRestart = true; // nothing left for OnQuit to undo
+                        ModManager.instance.StartCoroutine(CloseAfterStartupRestore());
+                    } else {
+                        Notice(CanForget
+                            ? "Your mods couldn't be restored automatically, twice.\nBook > Mods > AMP > Forget swap leaves the folders where they are."
+                            : "Your mods couldn't be restored automatically:\n" + journal.lastError + "\nBook > Mods > AMP > Restore my mods.");
+                    }
+                    break;
+                // None: PC Temporary swaps are restored on quit (OnQuit); a crash leaves Applied behind, "Restore my mods" handles it
             }
+        }
+
+        private const float StartupCloseWait = 120f; // how long the player gets to load into a level and read why the game closes
+
+        private static IEnumerator CloseAfterStartupRestore() {
+            float waited = 0f;
+            while(!InPlayableLevel() && waited < StartupCloseWait) {
+                yield return new WaitForSecondsRealtime(1f);
+                waited += 1f;
+            }
+            Log.Info(Defines.CLIENT, "Mod swap: restored in-game at startup, the game closes to load the player's own mods.");
+            yield return CloseForRestart("Your own mods were put back after the last multiplayer session.\nThe game closes now: start it again to load them.");
         }
 
         // Application.quitting: an applied swap (Temporary or Keep) is undone once the game has closed

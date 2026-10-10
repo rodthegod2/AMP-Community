@@ -26,6 +26,7 @@ namespace AMP.Network.Data {
         internal bool greeted = false;
         internal volatile string modSyncState = ""; // "", "waiting", "setup", "ready", "kicked" (see ModSyncHost)
         internal volatile string modSyncPlatform = ""; // what the joiner's last mod sync report said ("windows", "android")
+        internal int modSyncQuestResend; // 1: this joiner got a mod list while Quest versions were still being looked up (ModSyncHost)
         internal readonly object modSyncLock = new object(); // every check-then-set of modSyncState happens inside it
 
         internal PlayerNetworkData _player = null;

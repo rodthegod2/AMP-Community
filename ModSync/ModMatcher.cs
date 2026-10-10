@@ -18,11 +18,24 @@ namespace AMP.ModSync {
     // What the host knows about the Quest version of one of its mods (hostingSettings.modMatches, by mod folder)
     public class ModMatch {
         public long modioId;      // the mod.io mod Quest players get; 0 = no Quest version
-        public bool confirmed;    // decided for good (exact match, or the host answered): never asked again
-        public long checkedTicks; // UTC ticks of the last mod.io check; undecided entries are checked again after a while
+        public bool confirmed;    // decided for good (exact match, or the host answered): never searched or asked again
+        public long checkedTicks; // UTC ticks of the last mod.io check; entries are checked again after a while (a "No" never)
+        public bool noQuestFile;  // a confirmed match whose mod.io page had no live Quest file (or was gone) at the last check
     }
 
     public enum MatchScore { None, Confirm, Auto }
+
+    // What the next mod.io check of a host mod is: its own page (installed from mod.io), the live Quest file of a confirmed match, or a search
+    public enum MatchCheck { None, OwnPage, LiveFile, Search }
+
+    // A run of the host's matching pass. Stop() ends every run started before it, also one whose mods were only known later.
+    public sealed class MatchGeneration {
+        private int current;
+
+        public int Begin() { return System.Threading.Interlocked.Increment(ref current); }
+        public void Stop() { System.Threading.Interlocked.Increment(ref current); }
+        public bool IsCurrent(int generation) { return System.Threading.Volatile.Read(ref current) == generation; }
+    }
 
     // Pairs a host mod that didn't come from mod.io (Nexus etc.) with a mod.io mod that has a Quest build
     public static class ModMatcher {
@@ -74,17 +87,42 @@ namespace AMP.ModSync {
             return sb.ToString();
         }
 
-        // What a host sends as ModEntry.questModioId for a stored match: the id, -1 for "no Quest version", 0 when nothing is known yet
+        // What a host sends as ModEntry.questModioId for a stored match: the id, -1 for "no Quest version" (also while the matched page has
+        // no live Quest file), 0 when nothing is known yet
         public static long QuestId(ModMatch match) {
             if(match == null) return 0;
-            return match.modioId > 0 ? match.modioId : -1;
+            return match.modioId > 0 && !match.noQuestFile ? match.modioId : -1;
         }
 
-        // A mod is (re)checked on mod.io when nothing is stored, or the stored answer wasn't final and is old
+        // A mod is (re)checked on mod.io when nothing is stored, or the stored answer is old; the host's "No" is final.
+        // A confirmed match is only re-checked for its live Quest file (one GetMod), never searched or asked again.
         public static bool NeedsCheck(ModMatch match, DateTime utcNow) {
             if(match == null) return true;
-            if(match.confirmed) return false;
+            if(match.confirmed && match.modioId <= 0) return false;
             return utcNow.Ticks - match.checkedTicks > RecheckAfter.Ticks;
+        }
+
+        public static MatchCheck CheckFor(ModEntry hostMod, ModMatch stored, DateTime utcNow) {
+            if(hostMod == null || !NeedsCheck(stored, utcNow)) return MatchCheck.None;
+            if(hostMod.modioId > 0) return MatchCheck.OwnPage;
+            if(stored != null && stored.confirmed && stored.modioId > 0) return MatchCheck.LiveFile;
+            return MatchCheck.Search;
+        }
+
+        // The other host folder that already stands for this mod.io mod (its own id.modio, or a stored match that joiners get), null when
+        // none: two folders must never be the same Quest mod (it would be installed twice). Only folders the host has now count.
+        public static string TakenBy(long modioId, string folder, IDictionary<string, ModMatch> stored, IEnumerable<ModEntry> hostMods) {
+            if(modioId <= 0) return null;
+            List<ModEntry> mods = (hostMods ?? new ModEntry[0]).Where(m => m != null && !string.IsNullOrEmpty(m.folder)
+                                                                         && !string.Equals(m.folder, folder, StringComparison.OrdinalIgnoreCase)).ToList();
+            ModEntry own = mods.FirstOrDefault(m => m.modioId == modioId);
+            if(own != null) return own.folder;
+            if(stored == null) return null;
+            foreach(ModEntry m in mods) {
+                ModMatch match;
+                if(m.modioId <= 0 && stored.TryGetValue(m.folder, out match) && QuestId(match) == modioId) return m.folder;
+            }
+            return null;
         }
 
         private static bool SameAuthor(string a, string b) {

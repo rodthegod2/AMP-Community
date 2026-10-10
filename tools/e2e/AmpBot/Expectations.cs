@@ -12,6 +12,7 @@ namespace AmpBot {
         // --join
         public string platform = "windows"; // the platform the bot plans and reports as ("android": a Quest joiner)
         public Dictionary<string, long> questIds = new Dictionary<string, long>(); // folder -> questModioId the host's mod list must carry
+        public bool questResend;           // the first mod list says Quest versions are still being looked up; the full one must follow
         public bool? planBlocks;           // the plan for the host's mods must (not) block joining
         public bool download;              // download what the plan adds/replaces, verify it in the bot's cache, then join anyway
         public List<string> downloaded = new List<string>();  // folders that must have been downloaded and verified

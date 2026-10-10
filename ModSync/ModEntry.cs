@@ -1,3 +1,5 @@
+using Newtonsoft.Json;
+
 namespace AMP.ModSync {
     // One mod folder as the mod sync sees it. Plain data so it can travel as JSON and be tested without the game.
     public class ModEntry {
@@ -14,5 +16,13 @@ namespace AMP.ModSync {
         // Host -> joiner only (appended in 1.1.0, older builds ignore it / send 0): the mod.io mod a Quest player gets for this mod.
         // > 0: that mod.io id has a live Android/Oculus file; -1: the host checked, there is no Quest version; 0: unknown (older host)
         public long   questModioId;
+        // Local only (never sent): the hash by AMP 1.0.0's rules, set when the folder has a modio-thumbnail.png (1.0.0 counted it), so a
+        // 1.0.0 host's hash of the same files still matches; null otherwise
+        [JsonIgnore] public string legacyHash;
+
+        // This folder holds exactly the files of that hash (either rule)
+        public bool HasHash(string other) {
+            return !string.IsNullOrEmpty(other) && (other == hash || other == legacyHash);
+        }
     }
 }

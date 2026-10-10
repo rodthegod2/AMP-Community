@@ -2971,7 +2971,8 @@ namespace AMP.UI {
             bool canDownload = ModSync.ModSwapClient.CanDownload(ModSync.ModSyncClient.Plan);
             bool busy = canDownload && ModSync.ModSwapClient.Busy;
             if(!busy) {
-                modSyncText.text = canDownload ? description + ModSyncDownloadNote() : description;
+                string reason = canDownload ? null : ModSync.ModSwapClient.CannotDownloadReason(ModSync.ModSyncClient.Plan);
+                modSyncText.text = canDownload ? description + ModSyncDownloadNote() : description + (reason != null ? "\n\n" + reason : "");
             }
             // Room for the download buttons between the text and the old button row
             modSyncTextRect.sizeDelta = new Vector2(1000, canDownload ? 360 : 480);

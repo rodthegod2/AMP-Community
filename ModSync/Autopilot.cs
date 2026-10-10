@@ -157,6 +157,8 @@ namespace AMP.ModSync {
                 case "expectMatch":         return ExpectMatch(step);
                 case "expectUnavailable":   return ExpectUnavailable(step);
                 case "expectCachedModio":   return ExpectCachedModio(step);
+                case "killGame":            return KillGame(n, state, statePath);
+                case "expectStartupRestore": return ExpectStartupRestore(step);
                 case "quit":                return Nothing(); // the end of the script reports DONE and quits
                 default: throw new InvalidOperationException("unknown step " + step.Name);
             }
@@ -338,6 +340,24 @@ namespace AMP.ModSync {
             }
         }
 
+        // Like Android ending the app: no quit event, so nothing gets undone on the way out. The runner starts the game again.
+        private static IEnumerator KillGame(int n, AutopilotState state, string statePath) {
+            state.step = n + 1;
+            state.Save(statePath);
+            Debug.Log(Prefix + "OK " + n + " (closing for the restart)");
+            yield return new WaitForSecondsRealtime(1f); // the log line reaches the file
+            System.Diagnostics.Process.GetCurrentProcess().Kill();
+            yield return new WaitForSecondsRealtime(10f);
+            failure = "the game is still running after killing itself";
+        }
+
+        private static IEnumerator ExpectStartupRestore(AutopilotStep step) {
+            if(!ModSwapClient.RestoredAtStartup) { failure = "this start didn't undo a swap in-game"; yield break; }
+            if(!ModSyncPaths.Available || Directory.Exists(Path.Combine(ModSyncPaths.ModsFolder, step.Str("folder")))) { failure = "Mods/" + step.Str("folder") + " is still there"; yield break; }
+            while(!ModSwapClient.ClosingForRestart) yield return Poll;
+            Debug.Log(Prefix + "INFO the game closes by itself to load the restored mods");
+        }
+
         private static IEnumerator ExpectRejoined(AutopilotState state) {
             if(!state.values.ContainsKey("restartedFrom")) { failure = "the game hasn't been restarted by this script (no downloadAndRestart before)"; yield break; }
             if(!ModSwapClient.RejoinStarted) { failure = "this start didn't rejoin by itself (the swap journal has no pending rejoin)"; yield break; }
@@ -452,7 +472,7 @@ namespace AMP.ModSync {
             Debug.Log(Prefix + "INFO cached as " + entry.hash + " (" + entry.sizeBytes + " bytes, modioId " + entry.modioId + ", modioFileId " + entry.modioFileId + ")");
             if(!File.Exists(Path.Combine(content, "manifest.json"))) failure = "the cached mod has no manifest.json";
             else if(step.Str("expectFile", null) != null && !File.Exists(Path.Combine(content, step.Str("expectFile")))) failure = "the cached mod has no " + step.Str("expectFile");
-            else if(Directory.GetFiles(content, "id.modio", SearchOption.AllDirectories).Length > 0) failure = "the cached mod has an id.modio";
+            else if(Directory.GetFiles(content, "*", SearchOption.AllDirectories).Any(ModInventory.IsModioIdFile)) failure = "the cached mod has an id.modio";
             else if(entry.modioFileId != download.fileId || entry.modioId != step.Int("id")) failure = "the cache entry doesn't record the mod.io ids";
         }
 

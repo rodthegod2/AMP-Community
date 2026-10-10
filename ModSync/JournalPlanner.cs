@@ -1,6 +1,8 @@
 using System.Linq;
 
 namespace AMP.ModSync {
+    public enum StartupAction { None, Forget, Rejoin, OfferRestore, RestoreAndClose }
+
     public static class JournalPlanner {
         // Disables first, then replaced mods are moved aside, then installs, then the load order
         public static SwapJournal Build(SyncPlan plan, string[] hostLoadOrder, string host, int port, string password, SwapMode mode) {
@@ -21,6 +23,27 @@ namespace AMP.ModSync {
             if(plan.loadOrderDiffers)
                 journal.ops.Add(new SwapOp { kind = SwapOpKind.LoadOrder });
             return journal;
+        }
+
+        // An address the next start can reconnect to by itself (Direct/IP join); a Steam lobby or a missing port can't be rejoined
+        public static bool CanRejoin(string host, int port) {
+            return !string.IsNullOrWhiteSpace(host) && port > 0 && port <= 65535;
+        }
+
+        // What a game start does with the journal it finds (after a half-applied "Planned" was turned into RestorePending).
+        // inGame (Quest): there is no helper, the game undoes the swap itself and then has to close (its catalogs came from the swapped folders).
+        public static StartupAction OnStartup(SwapJournal journal, bool inGame) {
+            if(journal == null) return StartupAction.None;
+            if(journal.IsFinishedKeepOnly()) return StartupAction.Forget;
+            switch(journal.state) {
+                case SwapState.Planned:
+                case SwapState.Restored:       return StartupAction.Forget;
+                case SwapState.RestorePending: return inGame ? StartupAction.RestoreAndClose : StartupAction.OfferRestore;
+                case SwapState.Applied:
+                    if(journal.rejoinPending) return StartupAction.Rejoin;
+                    return inGame ? StartupAction.RestoreAndClose : StartupAction.None; // PC: the helper restores on quit; a crash leaves "Restore my mods"
+                default:                       return StartupAction.None;
+            }
         }
 
         // AMP replaces its own folder with a new build (an AMP update from a release): one kept pair of ops, nothing to rejoin afterwards.

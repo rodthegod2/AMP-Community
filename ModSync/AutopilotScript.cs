@@ -58,6 +58,10 @@ namespace AMP.ModSync {
             { "expectMatch",         "folder:folder modioId:int[0-999999999999] confirm:bool?" },
             { "expectUnavailable",   "folder:folder" },                              // the mod plan lists this host mod as not available here
             { "expectCachedModio",   "folder:folder platform:string" },              // the cached copy of this mod is the mod.io file live for that platform
+            // Ends the game process without quitting (no Application.quitting), like Android ending an app; the next start goes on after it
+            { "killGame",            "" },
+            // This start found a swap that was never undone, undid it in-game (Quest) and is closing by itself: folder (installed by the swap) is gone
+            { "expectStartupRestore", "folder:folder" },
             { "quit",                "" },
         };
 

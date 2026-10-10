@@ -34,6 +34,7 @@ internal static class Program {
         MatcherTests();
         QuestTests();
         QuestFlowTests();
+        ReviewFixTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
@@ -1116,7 +1117,7 @@ internal static class Program {
         T("quest id: a match gives its id", ModMatcher.QuestId(new ModMatch { modioId = 5966899, confirmed = true }) == 5966899);
         T("quest id: no Quest version is -1", ModMatcher.QuestId(new ModMatch { modioId = 0, confirmed = true }) == -1);
         T("recheck: nothing stored", ModMatcher.NeedsCheck(null, now));
-        T("recheck: never for a confirmed answer", !ModMatcher.NeedsCheck(new ModMatch { confirmed = true, checkedTicks = now.AddYears(-1).Ticks }, now));
+        T("recheck: never for the host's No", !ModMatcher.NeedsCheck(new ModMatch { confirmed = true, checkedTicks = now.AddYears(-1).Ticks }, now));
         T("recheck: not for a recent unconfirmed answer", !ModMatcher.NeedsCheck(new ModMatch { checkedTicks = now.AddDays(-6).Ticks }, now));
         T("recheck: after a week for an unconfirmed answer", ModMatcher.NeedsCheck(new ModMatch { checkedTicks = now.AddDays(-8).Ticks }, now));
     }
@@ -1228,6 +1229,118 @@ internal static class Program {
     }
 
     private class OldEntry { public string folder = ""; }
+
+    // Fixes from the review of phase 4 (1.1.0)
+    private static void ReviewFixTests() {
+        DateTime now = new DateTime(2026, 10, 10, 0, 0, 0, DateTimeKind.Utc);
+        // 1: a confirmed match's live Quest file is checked again after a week (one GetMod), the host's No never
+        var yes = new ModMatch { modioId = 77, confirmed = true, checkedTicks = now.AddDays(-8).Ticks };
+        T("recheck: a confirmed match after a week", ModMatcher.NeedsCheck(yes, now) && ModMatcher.CheckFor(M("JJS"), yes, now) == MatchCheck.LiveFile);
+        T("recheck: a confirmed match not within the week", ModMatcher.CheckFor(M("JJS"), new ModMatch { modioId = 77, confirmed = true, checkedTicks = now.AddDays(-2).Ticks }, now) == MatchCheck.None);
+        T("recheck: the host's No is final", ModMatcher.CheckFor(M("JJS"), new ModMatch { modioId = 0, confirmed = true, checkedTicks = now.AddYears(-1).Ticks }, now) == MatchCheck.None);
+        T("recheck: a mod from mod.io checks its own page", ModMatcher.CheckFor(M("F", modio: 5), null, now) == MatchCheck.OwnPage);
+        T("recheck: an old unconfirmed answer searches again", ModMatcher.CheckFor(M("X"), new ModMatch { checkedTicks = now.AddDays(-8).Ticks }, now) == MatchCheck.Search
+            && ModMatcher.CheckFor(M("X"), null, now) == MatchCheck.Search);
+        T("quest id: a match without a live Quest file is sent as -1", ModMatcher.QuestId(new ModMatch { modioId = 77, confirmed = true, noQuestFile = true }) == -1);
+        T("mod.io: not found / deleted is gone, other errors are not", ModioRules.IsGone(20000, 15022) && ModioRules.IsGone(0, 15023) && ModioRules.IsGone(404, 0)
+            && !ModioRules.IsGone(20302, 0) && !ModioRules.IsGone(11008, 0));
+
+        // 2: a matching pass started before StopHost never counts as current again, even when its mods are only known later
+        var generation = new MatchGeneration();
+        int first = generation.Begin();
+        T("matcher generation: current until stopped", generation.IsCurrent(first));
+        generation.Stop();
+        T("matcher generation: a stop ends the run started before it", !generation.IsCurrent(first));
+        int second = generation.Begin();
+        T("matcher generation: a new hosting session is a new run", generation.IsCurrent(second) && !generation.IsCurrent(first));
+
+        // 3: what a start does with the journal it finds
+        Func<SwapState, bool, SwapJournal> J = (state, rejoin) => new SwapJournal { state = state, rejoinPending = rejoin, ops = { new SwapOp { kind = SwapOpKind.Install, folder = "A", done = true } } };
+        T("startup: Quest, applied and never rejoined -> rejoin", JournalPlanner.OnStartup(J(SwapState.Applied, true), true) == StartupAction.Rejoin);
+        T("startup: Quest, a session that ended without the restore -> restore and close", JournalPlanner.OnStartup(J(SwapState.Applied, false), true) == StartupAction.RestoreAndClose);
+        T("startup: Quest, a restore that stopped halfway is retried", JournalPlanner.OnStartup(J(SwapState.RestorePending, false), true) == StartupAction.RestoreAndClose);
+        T("startup: PC, a pending restore is offered (the helper does it)", JournalPlanner.OnStartup(J(SwapState.RestorePending, false), false) == StartupAction.OfferRestore);
+        T("startup: PC, applied without rejoin waits for quit", JournalPlanner.OnStartup(J(SwapState.Applied, false), false) == StartupAction.None);
+        T("startup: planned or restored journals are forgotten", JournalPlanner.OnStartup(J(SwapState.Planned, false), true) == StartupAction.Forget
+            && JournalPlanner.OnStartup(J(SwapState.Restored, false), false) == StartupAction.Forget && JournalPlanner.OnStartup(null, true) == StartupAction.None);
+        var update = new SwapJournal { state = SwapState.Applied, ops = { new SwapOp { kind = SwapOpKind.Install, folder = "MultiplayerMod", keep = true, done = true } } };
+        T("startup: a finished AMP update is forgotten", JournalPlanner.OnStartup(update, false) == StartupAction.Forget);
+
+        // 4: an in-game (Quest) swap needs an address the next start can rejoin
+        T("rejoin: IP and port", JournalPlanner.CanRejoin("192.168.1.5", 26950));
+        T("rejoin: no address or no port can't be rejoined", !JournalPlanner.CanRejoin("", 26950) && !JournalPlanner.CanRejoin(" ", 26950) && !JournalPlanner.CanRejoin(null, 26950)
+            && !JournalPlanner.CanRejoin("1.2.3.4", 0) && !JournalPlanner.CanRejoin("1.2.3.4", 70000));
+
+        using(var f = new TestFolders()) {
+            // 5: a 1.0.0 host counted modio-thumbnail.png; our copy of the same files is not "another version"
+            string a = f.Mod("Fascia");
+            f.File_(a, "Items/x.json", "{}");
+            f.File_(a, "modio-thumbnail.png", "png");
+            string b = f.Mod("Plain");
+            f.File_(b, "Items/y.json", "{}");
+            List<ModEntry> mine = ModInventory.Scan(f.Mods, f.Cache, true);
+            ModEntry fascia = mine.Single(m => m.folder == "Fascia"), plain = mine.Single(m => m.folder == "Plain");
+            T("legacy hash: set when there is a modio-thumbnail.png, and differs", fascia.legacyHash != null && fascia.legacyHash != fascia.hash && plain.legacyHash == null);
+            T("legacy hash: never sent", !Newtonsoft.Json.JsonConvert.SerializeObject(fascia).Contains("legacyHash"));
+            var oldHost = Host("windows", M("Fascia", hash: fascia.legacyHash), M("Plain", hash: plain.hash));
+            T("legacy hash: a 1.0.0 host's hash of the same files needs no download", P(oldHost, "windows", mine.ToArray()).steps.Count == 0);
+            var newHost = Host("windows", M("Fascia", hash: fascia.hash), M("Plain", hash: plain.hash));
+            T("legacy hash: a 1.1.0 host's hash matches as before", P(newHost, "windows", mine.ToArray()).steps.Count == 0);
+            T("legacy hash: other files are still another version", P(Host("windows", M("Fascia", hash: new string('e', 64)), M("Plain", hash: plain.hash)), "windows", mine.ToArray()).Of(SyncAction.Replace).Count() == 1);
+
+            // 6: id.modio in any spelling
+            string c = f.Mod("Upper");
+            f.File_(c, "Items/z.json", "{}");
+            string before = ModInventory.Scan(f.Mods, f.Cache, true).Single(m => m.folder == "Upper").hash;
+            f.File_(c, "ID.MODIO", "{\"id\":1}");
+            f.File_(c, "Sub/Id.Modio", "1");
+            T("id.modio: any spelling is ignored by the hash", ModInventory.Scan(f.Mods, f.Cache, true).Single(m => m.folder == "Upper").hash == before);
+            T("id.modio: any spelling is never transferred", !TransferRules.ListTransferFiles(c).Any(x => x.path.EndsWith("modio", StringComparison.OrdinalIgnoreCase)));
+            T("id.modio: names compare ignoring case", ModInventory.IsModioIdFile("x/ID.modio") && ModInventory.IsModioIdFile("id.MODIO") && !ModInventory.IsModioIdFile("id.modio.txt") && !ModInventory.IsModioIdFile(null));
+            T("id.modio: stripping removes every spelling", ModInventory.StripModioIds(c) == 2 && !Directory.GetFiles(c, "*", SearchOption.AllDirectories).Any(ModInventory.IsModioIdFile)
+                && File.Exists(Path.Combine(c, "Items", "z.json")));
+        }
+
+        // 7: two host folders must never be the same Quest mod
+        var stored = new Dictionary<string, ModMatch> { { "JJS", new ModMatch { modioId = 77, confirmed = true } }, { "Old", new ModMatch { modioId = 88, confirmed = true } },
+                                                        { "NoFile", new ModMatch { modioId = 99, confirmed = true, noQuestFile = true } } };
+        var hostMods = new List<ModEntry> { M("JJS"), M("JJS Copy"), M("Fascia", modio: 66), M("NoFile") };
+        T("dedupe: a stored match of another folder takes the id", ModMatcher.TakenBy(77, "JJS Copy", stored, hostMods) == "JJS");
+        T("dedupe: a mod's own mod.io page takes the id", ModMatcher.TakenBy(66, "JJS Copy", stored, hostMods) == "Fascia");
+        T("dedupe: the folder itself doesn't block", ModMatcher.TakenBy(77, "JJS", stored, hostMods) == null);
+        T("dedupe: folders the host doesn't have any more don't block", ModMatcher.TakenBy(88, "JJS Copy", stored, hostMods) == null);
+        T("dedupe: a match without a live Quest file doesn't block", ModMatcher.TakenBy(99, "JJS Copy", stored, hostMods) == null);
+        T("dedupe: no id is never taken", ModMatcher.TakenBy(0, "JJS Copy", stored, hostMods) == null && ModMatcher.TakenBy(77, "X", null, null) == null);
+        var twice = P(Host("windows", Q("JJS", quest: 77), Q("JJS Copy", quest: 77)), "android");
+        T("dedupe (joiner): the second folder mapped to the same mod.io mod is unavailable", twice.Of(SyncAction.Add).Single().hostMod.folder == "JJS"
+            && twice.Of(SyncAction.Unavailable).Single().hostMod.folder == "JJS Copy");
+        var haveIt = P(Host("windows", Q("JJS", quest: 77), Q("JJS Copy", quest: 77)), "android", Q("JJS Copy", modio: 77, name: "x"));
+        T("dedupe (joiner): our installed copy counts before anything is added", haveIt.Of(SyncAction.Add).Count() == 0 && haveIt.Of(SyncAction.Unavailable).Count() == 1);
+        T("dedupe (joiner): same platform is untouched", P(Host("windows", Q("A", modio: 5), Q("B", modio: 5)), "windows").Of(SyncAction.Add).Count() == 2);
+
+        // 8: the Quest plan shows the mod.io title and size once looked up
+        var quest = P(Host("windows", Q("JJS", quest: 77)), "android");
+        SyncStep add = quest.Of(SyncAction.Add).Single();
+        T("plan text: before the lookup", quest.Describe().Contains("JJS (from mod.io)"));
+        add.modioTitle = "Jujutsu Sorcerers (Nomad)";
+        add.modioBytes = 12L * 1024 * 1024;
+        T("plan text: mod.io title and size", quest.Describe().Contains("JJS (from mod.io: \"Jujutsu Sorcerers (Nomad)\", 12 MB)"));
+        add.action = SyncAction.Unavailable;
+        T("plan text: a mod mod.io has no file for moves to the warning", !quest.BlocksJoin && quest.Describe().Contains("Not available on your platform"));
+
+        // 11: PC joiners don't wait for the Quest matching, joiners on another platform wait for the host's second list
+        var pending = Host("windows", Q("A"));
+        pending.questPending = true;
+        T("quest wait: another platform waits", pending.WaitForQuestIds("android"));
+        T("quest wait: the host's own platform doesn't", !pending.WaitForQuestIds("windows") && !pending.WaitForQuestIds("WINDOWS"));
+        T("quest wait: nothing pending, nobody waits", !Host("windows", Q("A")).WaitForQuestIds("android"));
+        T("quest wait: an older host's list (no field) never waits", !Newtonsoft.Json.JsonConvert.DeserializeObject<HostModSet>("{\"protocol\":1,\"platform\":\"windows\",\"mods\":[]}").WaitForQuestIds("android"));
+        string error;
+        var killed = AutopilotScript.Parse(@"[{""step"":""killGame""},{""step"":""expectStartupRestore"",""folder"":""InstantSloMo"",""timeout"":300}]", out error);
+        T("autopilot: killGame and expectStartupRestore parse (" + error + ")", killed != null && killed.Steps[1].Str("folder") == "InstantSloMo");
+        T("autopilot: expectStartupRestore needs a folder", AutopilotScript.Parse(@"[{""step"":""expectStartupRestore""}]", out error) == null);
+        T("quest wait: the flag travels", Newtonsoft.Json.JsonConvert.DeserializeObject<HostModSet>(Newtonsoft.Json.JsonConvert.SerializeObject(pending)).questPending);
+    }
 
     private static void AutopilotTests() {
         string error;

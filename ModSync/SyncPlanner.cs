@@ -13,6 +13,8 @@ namespace AMP.ModSync {
         public string     source = ""; // "modio" or "host" for Add/Replace
         public long       modioId;     // source "modio": the mod.io mod to download (on Quest it can be another page than the host's)
         public string     cacheHash;   // set after a download that isn't stored under the host's hash (another platform's build)
+        public string     modioTitle;  // cross-platform: the mod.io page's title and this platform's file size, once looked up (shown before applying)
+        public long       modioBytes;
 
         public ModEntry Mod { get { return hostMod ?? localMod; } }
     }
@@ -47,7 +49,10 @@ namespace AMP.ModSync {
             foreach(SyncStep step in group) {
                 string line = "  " + (step.Mod.isAmp ? "AMP update (host's build) (stays installed; your previous build is kept in AMP_ModCache/old)" : step.Mod.name);
                 if((action == SyncAction.Add || action == SyncAction.Replace) && !crossPlatform) line += " (" + Megabytes(step.Mod.sizeBytes) + ")";
-                if(action == SyncAction.Add && crossPlatform) line += " (from mod.io)";
+                if(action == SyncAction.Add && crossPlatform) {
+                    line += string.IsNullOrEmpty(step.modioTitle) ? " (from mod.io)"
+                          : " (from mod.io: \"" + step.modioTitle + "\"" + (step.modioBytes > 0 ? ", " + Megabytes(step.modioBytes) : "") + ")";
+                }
                 if(step.Mod.hasCode && action != SyncAction.Disable) line += " [contains code]";
                 sb.AppendLine(line);
             }
@@ -71,21 +76,39 @@ namespace AMP.ModSync {
             List<ModEntry> mine = local.Where(m => m != null && m.enabled && !leftAlone(m)).ToList();
             var matched = new HashSet<ModEntry>();
             var shared  = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // folders both sides have enabled (AMP and personal mods excluded)
+            var questIds = new HashSet<long>(); // across platforms: mod.io mods already standing for a host mod (one may not be installed twice)
 
+            // Pairs first, so the mod.io mods our own copies already stand for are known before anything is added
+            var pairs = new List<KeyValuePair<ModEntry, ModEntry>>(); // host mod, our copy (null: we don't have it)
             foreach(ModEntry hostMod in hostMods.Where(m => m.enabled && !leftAlone(m))) {
                 ModEntry localMod = mine.FirstOrDefault(m => !matched.Contains(m) && SameMod(hostMod, m, samePlatform));
+                if(localMod != null) {
+                    matched.Add(localMod);
+                    if(!samePlatform) {
+                        if(QuestModioId(hostMod) > 0) questIds.Add(QuestModioId(hostMod));
+                        if(localMod.modioId > 0) questIds.Add(localMod.modioId);
+                    }
+                }
+                pairs.Add(new KeyValuePair<ModEntry, ModEntry>(hostMod, localMod));
+            }
+
+            foreach(KeyValuePair<ModEntry, ModEntry> pair in pairs) {
+                ModEntry hostMod = pair.Key, localMod = pair.Value;
                 long modioId = samePlatform ? hostMod.modioId : QuestModioId(hostMod);
                 string source = modioId > 0 ? "modio" : (samePlatform ? "host" : "");
 
                 if(localMod == null) {
-                    plan.steps.Add(new SyncStep { action = source == "" ? SyncAction.Unavailable : SyncAction.Add, hostMod = hostMod, source = source, modioId = modioId });
+                    // A second host folder mapped to the same mod.io mod (a 1.1.0 host prevents it): only the first gets it
+                    bool duplicate = !samePlatform && modioId > 0 && !questIds.Add(modioId);
+                    plan.steps.Add(new SyncStep { action = source == "" || duplicate ? SyncAction.Unavailable : SyncAction.Add, hostMod = hostMod,
+                                                  source = duplicate ? "" : source, modioId = duplicate ? 0 : modioId });
                     continue;
                 }
-                matched.Add(localMod);
                 shared.Add(hostMod.folder);
 
-                // Builds differ between platforms, so versions are only compared on the same platform
-                if(samePlatform && !string.IsNullOrEmpty(hostMod.hash) && !string.IsNullOrEmpty(localMod.hash) && hostMod.hash != localMod.hash) {
+                // Builds differ between platforms, so versions are only compared on the same platform.
+                // A 1.0.0 host counted modio-thumbnail.png: our copy's hash by its rules counts as the same version.
+                if(samePlatform && !string.IsNullOrEmpty(hostMod.hash) && !string.IsNullOrEmpty(localMod.hash) && !localMod.HasHash(hostMod.hash)) {
                     // mod.io only serves its latest version, which may not be the host's, so replacements always come from the host
                     plan.steps.Add(new SyncStep { action = SyncAction.Replace, hostMod = hostMod, localMod = localMod, source = "host" });
                 }

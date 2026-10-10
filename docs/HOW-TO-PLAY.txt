@@ -2,8 +2,8 @@ AMP multiplayer (fixed build) - how to install, host and join
 =============================================================
 
 Everyone who plays together needs THIS SAME BUILD (AMP Community). It will
-not work well with the normal AMP from Nexus/mod.io. PC (Steam) only.
-Quest support is coming in a later version.
+not work well with the normal AMP from Nexus/mod.io. PC (Steam); Quest
+(Nomad) support is new and EXPERIMENTAL (see section 8).
 
 Download: https://github.com/rodthegod2/AMP-Community/releases
 (get "AMP-Community-<version>.zip" from the latest release; SHA256SUMS.txt
@@ -88,8 +88,10 @@ When you join, the host's mod list is compared with yours (you'll see
 If they differ, the book (Mods > AMP) lists what to download, replace or
 turn off. On PC press "Download & restart" (choose Temporary or Keep first):
  - the mods download from the host (only from a host running this build,
-   using "Host on PC"), the game closes, swaps your Mods folder, reopens
-   through Steam and reconnects to the host by itself
+   using "Host on PC"); mods the host got from mod.io come straight from
+   mod.io when mod.io still has exactly the host's version. The game
+   closes, swaps your Mods folder, reopens through Steam and reconnects to
+   the host by itself
  - Temporary: when you quit, your own mods come back and the downloaded ones
    go back into the cache (AMP_ModCache next to the Mods folder) for next time
  - Keep: downloaded mods stay installed; mods that were only switched off
@@ -101,7 +103,7 @@ While the host's mods are installed, the game uses a separate multiplayer
 save (copies of your characters and settings), so your own characters never
 lose items from mods that are switched off. Back to normal when you quit.
 If your AMP build differs from the host's, AMP is updated the same way.
-Quest players can't download yet (Quest support is coming in a later version).
+Quest players: see section 8.
 
 Host settings in config.json -> "hostingSettings":
  "modSyncMode": "warn"     joiners see the differences and can "Join anyway" (default)
@@ -141,3 +143,61 @@ In config.json set "customName": "YourName" (max 32 characters).
 Other host settings (config.json -> "hostingSettings"):
  allowVoiceChat, ownerHoldSeconds (default 1.5, stops enemies flickering
  between players)
+
+
+8. QUEST (NOMAD) - EXPERIMENTAL
+-------------------------------
+Quest support is new and has NOT been tested on a headset yet. Expect
+problems, and please report what happens. Use a spare character.
+
+Install on Quest (needs a PC and a USB cable, the same zip as on PC):
+ 1. Start Blade & Sorcery: Nomad once and quit it (it creates its folders).
+ 2. Connect the Quest to the PC with USB and allow file access in the
+    headset.
+ 3. Copy the "MultiplayerMod" folder from the zip into
+      Quest\Internal shared storage\Android\data\com.Warpfrog.BladeAndSorcery\files\Mods\
+    (create "Mods" if it isn't there). The folder name
+    com.Warpfrog.BladeAndSorcery is UNVERIFIED: it is Unity's default for
+    Warpfrog's "BladeAndSorcery" and what the game's code points to
+    (Android/data/<package>/files/Mods), but it hasn't been checked on a
+    headset. If it doesn't exist, use the files\Mods folder inside the
+    Android\data folder that belongs to Blade & Sorcery.
+ Without a PC: not possible yet. AMP Community isn't listed on mod.io
+ (the AMP on mod.io is the original, which doesn't work with this build);
+ a mod.io listing is planned so Quest players can install it in-game.
+
+Join a PC host:
+ - Book -> Mods -> AMP -> "Join" -> "Direct (IP)", as in section 3.
+   Setting up the host's mods needs this direct join: after the restart the
+   game reconnects to that address by itself (server list / lobby joins
+   can't set up mods).
+ - Your mods are compared with the host's. Quest players get mods from
+   mod.io, never from the host (PC files don't work on Quest):
+    * mods the host installed from mod.io, if that mod.io page has a Quest
+      file
+    * Nexus mods the host matched to a Quest version on mod.io (see below)
+   The list shows each download's mod.io title and size. Mods with no
+   Quest version are listed as "Not available on your platform": you join
+   without them (their items show up as default items for you).
+ - Press "Download & restart": the mods download from mod.io and are
+   installed, then the game closes. Start it again: it reconnects to the
+   host by itself.
+ - Temporary: when you quit, your own mods come back. If the game ended
+   without quitting normally (crash, headset asleep), the next start puts
+   your mods back and closes once more: just start it again.
+   "Restore my mods" (Mods > AMP) does the same at any time.
+ - On Quest your own characters are used (no separate multiplayer save
+   yet): items from mods that get turned off can be lost. Use a spare
+   character.
+
+Host (PC) - Quest versions of your mods:
+ When you host, AMP looks your mods up on mod.io (read only, no login):
+  - mods you got from mod.io: used for Quest players if they have a Quest
+    file
+  - other mods (Nexus): searched by name. Same name and author is used
+    automatically; a close match is asked on the AMP connection page
+    ("Quest version of ...? Yes / No"), one at a time
+ Answers are saved in config.json -> "hostingSettings" -> "modMatches"
+ (remove an entry to be asked again). Found matches are checked again
+ after a week. Quest players who join while this is still running get the
+ updated list as soon as it is done (within 30 seconds).

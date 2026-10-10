@@ -12,7 +12,7 @@ namespace AMP.ModSync {
     public static class ModInventory {
         // Rewritten on every mod.io update check, so it must not change a mod's hash
         // Plus OS folder metadata and logs, which appear and change without the mod changing
-        private static readonly string[] HashIgnoredFiles = { "id.modio", "Thumbs.db", "desktop.ini", ".DS_Store", ModioThumbnail };
+        private static readonly string[] HashIgnoredFiles = { ModioIdFile, "Thumbs.db", "desktop.ini", ".DS_Store", ModioThumbnail };
         // Written into a mod folder by the game's mod manager when it shows the mod (not part of the mod.io download). Counted by AMP 1.0.0.
         internal const string ModioThumbnail = "modio-thumbnail.png";
         private const string HashCacheFile = "hashcache.json";
@@ -30,7 +30,10 @@ namespace AMP.ModSync {
                         string[] files = Directory.GetFiles(dir, "*", SearchOption.AllDirectories);
                         ModEntry entry = ReadEntry(dir, files);
                         if(entry == null) continue;
-                        if(hashAll || entry.isAmp) entry.hash = HashFolder(dir, files, cache);
+                        if(hashAll || entry.isAmp) {
+                            entry.hash = HashFolder(dir, files, cache);
+                            if(files.Any(f => Path.GetFileName(f).Equals(ModioThumbnail, StringComparison.OrdinalIgnoreCase))) entry.legacyHash = HashFolder(dir, files, cache, true);
+                        }
                         result.Add(entry);
                     } catch(Exception e) when (e is IOException || e is UnauthorizedAccessException) {
                         // a folder that vanished or can't be read is skipped, never hashed partially
@@ -114,6 +117,24 @@ namespace AMP.ModSync {
                 lines.Append(file.Key).Append('\0').Append(cache.FileHash(file.Value)).Append('\n');
             }
             return HashCache.Hex(SHA256Bytes(Encoding.UTF8.GetBytes(lines.ToString())));
+        }
+
+        internal const string ModioIdFile = "id.modio";
+
+        // Any spelling: Android file systems are case-sensitive, and an id.modio of any case must never get into a mod we install
+        public static bool IsModioIdFile(string path) {
+            return Path.GetFileName(path ?? "").Equals(ModioIdFile, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Deletes every id.modio (any case, any depth) under folder; returns how many
+        public static int StripModioIds(string folder) {
+            int removed = 0;
+            foreach(string file in Directory.GetFiles(folder, "*", SearchOption.AllDirectories).Where(IsModioIdFile)) {
+                File.SetAttributes(file, FileAttributes.Normal);
+                File.Delete(file);
+                removed++;
+            }
+            return removed;
         }
 
         // Files that count for a mod's hash (and therefore get transferred)
