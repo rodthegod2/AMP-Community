@@ -16,8 +16,32 @@ internal static class Program {
         PlannerTests();
         ChunkTests();
         SettingsTests();
+        TransferRulesTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
+    }
+
+    private static void TransferRulesTests() {
+        T("plain path is kept", TransferRules.NormalizeRelativePath("Items/sword.json") == "Items/sword.json");
+        T("backslashes become slashes", TransferRules.NormalizeRelativePath("Items\\sword.json") == "Items/sword.json");
+        T("parent dir is rejected", TransferRules.NormalizeRelativePath("../evil.dll") == null);
+        T("hidden parent dir is rejected", TransferRules.NormalizeRelativePath("Items/../../evil.dll") == null);
+        T("rooted path is rejected", TransferRules.NormalizeRelativePath("C:/Windows/evil.dll") == null && TransferRules.NormalizeRelativePath("/etc/x") == null);
+        T("drive-relative path is rejected", TransferRules.NormalizeRelativePath("C:evil.dll") == null);
+        T("empty and dot segments are rejected", TransferRules.NormalizeRelativePath("") == null && TransferRules.NormalizeRelativePath("a//b") == null && TransferRules.NormalizeRelativePath("./a") == null);
+        T("invalid file name chars are rejected", TransferRules.NormalizeRelativePath("a|b.json") == null);
+        T("reserved Windows names are rejected", TransferRules.NormalizeRelativePath("Items/CON.json") == null && TransferRules.NormalizeRelativePath("nul") == null);
+
+        using(var f = new TestFolders()) {
+            string mod = f.Mod("ModA");
+            f.File_(mod, "Items/sword.json", "{}");
+            f.File_(mod, "id.modio", "{\"id\":1}");
+            f.File_(mod, "Thumbs.db", "x");
+            f.File_(mod, "log.log", "x");
+            var files = TransferRules.ListTransferFiles(mod);
+            T("transfer list has the hashed files only", files.Select(x => x.path).OrderBy(p => p).SequenceEqual(new[] { "Items/sword.json", "manifest.json" }));
+            T("transfer list has sizes", files.All(x => x.size > 0));
+        }
     }
 
     private static void InventoryTests() {

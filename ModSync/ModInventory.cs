@@ -104,14 +104,21 @@ namespace AMP.ModSync {
 
         internal static string HashFolder(string dir, string[] files, HashCache cache) {
             var lines = new StringBuilder();
-            var ordered = files.Where(f => !HashIgnoredFiles.Contains(Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
-                                        && !f.EndsWith(".log", StringComparison.OrdinalIgnoreCase))
+            var ordered = files.Where(IsHashedFile)
                                .Select(f => new KeyValuePair<string, string>(RelativePath(dir, f), f))
                                .OrderBy(f => f.Key, StringComparer.Ordinal);
             foreach(var file in ordered) {
                 lines.Append(file.Key).Append('\0').Append(cache.FileHash(file.Value)).Append('\n');
             }
             return HashCache.Hex(SHA256Bytes(Encoding.UTF8.GetBytes(lines.ToString())));
+        }
+
+        // Files that count for a mod's hash (and therefore get transferred)
+        internal static bool IsHashedFile(string path) {
+            string name = Path.GetFileName(path);
+            if(HashIgnoredFiles.Contains(name, StringComparer.OrdinalIgnoreCase)) return false;
+            if(name.EndsWith(".log", StringComparison.OrdinalIgnoreCase)) return false;
+            return true;
         }
 
         internal static string RelativePath(string root, string file) {
