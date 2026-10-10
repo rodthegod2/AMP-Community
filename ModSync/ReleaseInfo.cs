@@ -82,6 +82,15 @@ namespace AMP.ModSync {
             return uri.Scheme == Uri.UriSchemeHttps && uri.IsDefaultPort && TrustedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase);
         }
 
+        // The first hop of an asset download must be this repo's own release download path (redirects to GitHub's CDN come after that)
+        public static bool IsReleaseAssetUrl(string url, string repo) {
+            Uri uri;
+            if(!IsValidRepo(repo) || !Uri.TryCreate(url, UriKind.Absolute, out uri)) return false;
+            return uri.Scheme == Uri.UriSchemeHttps && uri.IsDefaultPort && uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+                   && uri.AbsolutePath.StartsWith("/" + repo + "/releases/download/", StringComparison.OrdinalIgnoreCase)
+                   && !uri.AbsolutePath.Contains("/../");
+        }
+
         // "owner/name" as GitHub spells it; the setting comes from a config file and ends up in a URL
         public static bool IsValidRepo(string repo) {
             return repo != null && System.Text.RegularExpressions.Regex.IsMatch(repo, @"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z")

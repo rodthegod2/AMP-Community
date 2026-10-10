@@ -11,9 +11,14 @@ namespace AMP.ModSync {
 
         // Extracts into a fresh folder under stagingRoot and returns the one folder holding AMP.dll and manifest.json
         public static string ExtractAmpFolder(string zipPath, string stagingRoot, long maxBytes) {
+            using(Stream stream = File.OpenRead(zipPath)) return ExtractAmpFolder(stream, stagingRoot, maxBytes);
+        }
+
+        // For a caller that already holds the zip open (it hashed the same stream), so the file can't change in between. Leaves the stream open.
+        public static string ExtractAmpFolder(Stream zipStream, string stagingRoot, long maxBytes) {
             string dest = Path.Combine(stagingRoot, Guid.NewGuid().ToString("N"));
             try {
-                using(var zip = new ZipArchive(File.OpenRead(zipPath), ZipArchiveMode.Read)) {
+                using(var zip = new ZipArchive(zipStream, ZipArchiveMode.Read, true)) {
                     Extract(zip, dest, maxBytes);
                 }
                 return FindAmpFolder(dest);

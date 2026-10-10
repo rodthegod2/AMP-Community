@@ -3,6 +3,7 @@ using Newtonsoft.Json.Converters;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace AMP.ModSync {
     public enum SwapMode  { Temporary, Keep }
@@ -35,6 +36,11 @@ namespace AMP.ModSync {
         public string   lastError = "";
         public int      restoreFailures;        // restores that didn't finish; after two the player may forget the swap
         public List<string> conflicts = new List<string>(); // folders moved aside because they were in the way (never deleted)
+
+        // AMP's own update: applied, every op kept, nothing to rejoin. Nothing is left to undo, so the journal can go.
+        public bool IsFinishedKeepOnly() {
+            return state == SwapState.Applied && !rejoinPending && ops.Count > 0 && ops.All(o => o.keep && o.done);
+        }
 
         public string ToJson() { return JsonConvert.SerializeObject(this, Formatting.Indented); }
 

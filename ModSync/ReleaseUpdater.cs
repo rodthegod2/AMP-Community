@@ -18,7 +18,8 @@ namespace AMP.ModSync {
         private const string UserAgent     = "AMP-Community-Updater";
         private const float  StartupDelay  = 10f;
         private const int    ApiTimeout    = 15;
-        private const int    DownloadTimeout = 120;
+        private const int    DownloadTimeout = 0;      // no total limit: a slow connection may take a while, a stall is caught by StallSeconds
+        private const float  StallSeconds = 30f;
         private const int    MaxRedirects  = 5;
         private const long   MaxApiBytes   = 1L << 20;    // release JSON
         private const long   MaxSumsBytes  = 64L << 10;   // SHA256SUMS.txt
@@ -176,6 +177,12 @@ namespace AMP.ModSync {
                 yield break;
             }
 
+            string repo = ModManager.safeFile.modSettings.updateRepo;
+            if(!ReleaseInfo.IsReleaseAssetUrl(sums.url, repo) || !ReleaseInfo.IsReleaseAssetUrl(zip.url, repo)) {
+                work.error = "The release points outside " + repo + ". Refused.";
+                yield break;
+            }
+
             var sumsResult = new Fetched();
             yield return Fetch(sums.url, null, MaxSumsBytes, ApiTimeout, null, sumsResult);
             if(!sumsResult.ok) { work.error = "Couldn't download the checksums: " + sumsResult.error; yield break; }
@@ -195,22 +202,23 @@ namespace AMP.ModSync {
         private static IEnumerator Unpack(UpdateWork work) {
             SetStatus("Checking the download...");
             Task task = Task.Run(() => {
-                string actual = FileSha256(work.zipPath);
-                if(actual != work.expectedSha) {
-                    File.Delete(work.zipPath);
-                    throw new InvalidDataException("The download doesn't match its checksum. It was deleted.");
-                }
+                // One open handle (nobody else may write) for hashing and extracting, so the file can't be swapped in between
+                bool mismatch;
                 var cache = new ModCache(work.cacheRoot);
                 cache.CleanPartial(TimeSpan.FromHours(1));
                 string staging = cache.NewStagingFolder();
                 try {
-                    string folder = ReleasePackage.ExtractAmpFolder(work.zipPath, staging, MaxUnpackedBytes);
-                    string[] files = Directory.GetFiles(folder, "*", SearchOption.AllDirectories);
-                    ModEntry entry = ModInventory.ReadEntry(folder, files);
-                    if(entry == null) throw new InvalidDataException("The release has no readable manifest.json.");
-                    entry.hash = ModInventory.HashFolder(folder, files, HashCache.Load(Path.Combine(staging, "nohashcache.json")));
-                    work.entry = cache.Commit(folder, entry);
-                    if(work.entry == null) throw new IOException("Couldn't store the new AMP in the cache.");
+                    using(var zipStream = new FileStream(work.zipPath, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+                        mismatch = StreamSha256(zipStream) != work.expectedSha;
+                        if(!mismatch) {
+                            zipStream.Seek(0, SeekOrigin.Begin);
+                            Commit(zipStream, staging, work, cache);
+                        }
+                    }
+                    if(mismatch) {
+                        File.Delete(work.zipPath);
+                        throw new InvalidDataException("The download doesn't match its checksum. It was deleted.");
+                    }
                 } finally {
                     try { if(Directory.Exists(staging)) Directory.Delete(staging, true); } catch(Exception) { }
                 }
@@ -222,6 +230,17 @@ namespace AMP.ModSync {
                 Log.Err(Defines.AMP, "AMP update: " + e);
                 work.error = "The update couldn't be unpacked: " + e.Message;
             }
+        }
+
+        private static void Commit(Stream zipStream, string staging, UpdateWork work, ModCache cache) {
+            string folder = ReleasePackage.ExtractAmpFolder(zipStream, staging, MaxUnpackedBytes);
+            string[] files = Directory.GetFiles(folder, "*", SearchOption.AllDirectories);
+            ModEntry entry = ModInventory.ReadEntry(folder, files);
+            if(entry == null) throw new InvalidDataException("The release has no readable manifest.json.");
+            if(entry.version != work.version) throw new InvalidDataException("The package says version \"" + entry.version + "\", the release is " + work.version + ".");
+            entry.hash = ModInventory.HashFolder(folder, files, HashCache.Load(Path.Combine(staging, "nohashcache.json")));
+            work.entry = cache.Commit(folder, entry);
+            if(work.entry == null) throw new IOException("Couldn't store the new AMP in the cache.");
         }
 
         // Journal with AMP's replacement, then the shared helper launch (it closes the game and relaunches it)
@@ -253,8 +272,7 @@ namespace AMP.ModSync {
             return null;
         }
 
-        private static string FileSha256(string path) {
-            using(var stream = File.OpenRead(path))
+        private static string StreamSha256(Stream stream) {
             using(SHA256 sha = SHA256.Create()) return HashCache.Hex(sha.ComputeHash(stream));
         }
 
@@ -269,13 +287,21 @@ namespace AMP.ModSync {
                 using(var request = UnityWebRequest.Get(url)) {
                     request.timeout = timeout;
                     request.redirectLimit = 0;
-                    request.SetRequestHeader("User-Agent", UserAgent);
-                    if(saveTo == null) request.SetRequestHeader("Accept", "application/vnd.github+json");
-                    else request.downloadHandler = new DownloadHandlerFile(saveTo) { removeFileOnAbort = true };
+                    try {
+                        request.SetRequestHeader("User-Agent", UserAgent);
+                    } catch(InvalidOperationException e) {
+                        Log.Warn(Defines.AMP, "Couldn't set the User-Agent header: " + e.Message); // GitHub's API may refuse the request without it
+                    }
+                    if(new Uri(url).Host == "api.github.com") request.SetRequestHeader("Accept", "application/vnd.github+json");
+                    if(saveTo != null) request.downloadHandler = new DownloadHandlerFile(saveTo) { removeFileOnAbort = true };
 
                     UnityWebRequestAsyncOperation op = request.SendWebRequest();
+                    long last = -1;
+                    float lastGrowth = Time.realtimeSinceStartup;
                     while(!op.isDone) {
                         long got = (long) request.downloadedBytes;
+                        if(got != last) { last = got; lastGrowth = Time.realtimeSinceStartup; }
+                        else if(Time.realtimeSinceStartup - lastGrowth > StallSeconds) { request.Abort(); result.error = "The connection stalled."; yield break; }
                         if(got > maxBytes) { request.Abort(); result.error = "The download is larger than expected."; yield break; }
                         if(progress != null) progress(got, ContentLength(request));
                         yield return null;
@@ -285,11 +311,16 @@ namespace AMP.ModSync {
                     if(code >= 300 && code < 400) {
                         string location = request.GetResponseHeader("Location");
                         Uri next;
-                        if(string.IsNullOrEmpty(location) || !Uri.TryCreate(new Uri(url), location, out next)) { result.error = "Bad redirect."; yield break; }
+                        if(string.IsNullOrEmpty(location) || !Uri.TryCreate(new Uri(url), location, out next)) {
+                            Log.Warn(Defines.AMP, "Update: bad redirect from " + url + ": HTTP " + code + ", Location \"" + location + "\"");
+                            result.error = "Bad redirect."; yield break;
+                        }
+                        Log.Debug(Defines.AMP, "Update: HTTP " + code + " to " + next.Host);
                         url = next.AbsoluteUri;
                         continue;
                     }
                     if(request.result != UnityWebRequest.Result.Success) {
+                        Log.Warn(Defines.AMP, "Update: request to " + new Uri(url).Host + " failed: HTTP " + code + ", " + request.error + ", Location \"" + request.GetResponseHeader("Location") + "\"");
                         result.error = code == 403 || code == 429 ? "GitHub is limiting requests right now. Try again later." : request.error;
                         yield break;
                     }

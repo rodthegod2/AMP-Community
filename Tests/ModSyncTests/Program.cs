@@ -896,6 +896,10 @@ internal static class Program {
         }
     }
 
+    private static bool CannotWrite(string path) {
+        try { using(File.OpenWrite(path)) { } return false; } catch(IOException) { return true; }
+    }
+
     private static void ReleasePackageTests() {
         using(var f = new TestFolders()) {
             const long max = 1 << 20;
@@ -904,6 +908,33 @@ internal static class Program {
             string amp = ReleasePackage.ExtractAmpFolder(good, staging, max);
             T("valid package gives the AMP folder", amp != null && File.Exists(Path.Combine(amp, "AMP.dll")) && Path.GetFileName(amp) == "MultiplayerMod");
             T("the folder is inside the staging root", amp != null && Path.GetDirectoryName(Path.GetDirectoryName(amp)) == staging);
+
+            using(var held = new FileStream(good, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+                held.Seek(5, SeekOrigin.Begin); // as after hashing: the caller rewinds, the overload must work from an open stream
+                held.Seek(0, SeekOrigin.Begin);
+                string viaStream = ReleasePackage.ExtractAmpFolder(held, Staging(f), max);
+                T("the stream overload extracts and leaves the stream open", File.Exists(Path.Combine(viaStream, "AMP.dll")) && held.CanRead);
+                T("a held zip can't be written to meanwhile", CannotWrite(good));
+            }
+
+            T("release asset url of the exact repo", ReleaseInfo.IsReleaseAssetUrl("https://github.com/RodTheGod2/amp-community/releases/download/v1.0.1/a.zip", "rodthegod2/AMP-Community"));
+            T("asset url of another repo or path is refused", !ReleaseInfo.IsReleaseAssetUrl("https://github.com/evil/AMP-Community/releases/download/v1/a.zip", "rodthegod2/AMP-Community")
+                && !ReleaseInfo.IsReleaseAssetUrl("https://github.com/rodthegod2/AMP-Community-evil/releases/download/v1/a.zip", "rodthegod2/AMP-Community")
+                && !ReleaseInfo.IsReleaseAssetUrl("https://github.com/rodthegod2/AMP-Community/raw/main/a.zip", "rodthegod2/AMP-Community")
+                && !ReleaseInfo.IsReleaseAssetUrl("https://objects.githubusercontent.com/rodthegod2/AMP-Community/releases/download/a", "rodthegod2/AMP-Community")
+                && !ReleaseInfo.IsReleaseAssetUrl("http://github.com/rodthegod2/AMP-Community/releases/download/a", "rodthegod2/AMP-Community"));
+
+            var finished = new SwapJournal { state = SwapState.Applied, rejoinPending = false };
+            finished.ops.Add(new SwapOp { keep = true, done = true });
+            T("a finished AMP-only keep journal can be dropped", finished.IsFinishedKeepOnly());
+            finished.ops.Add(new SwapOp { keep = false, done = true });
+            T("a journal with a non-kept op is kept", !finished.IsFinishedKeepOnly());
+            finished.ops.RemoveAt(1);
+            finished.rejoinPending = true;
+            T("a journal that still rejoins is kept", !finished.IsFinishedKeepOnly());
+            finished.rejoinPending = false;
+            finished.ops[0].done = false;
+            T("an unfinished journal is kept", !finished.IsFinishedKeepOnly());
 
             string evil = MakeZip(f, "evil.zip", "MultiplayerMod/AMP.dll", "dll", "MultiplayerMod/manifest.json", "{}", "../evil.dll", "x");
             string evilStaging = Staging(f);

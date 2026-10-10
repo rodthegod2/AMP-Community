@@ -109,7 +109,13 @@ namespace AMP.ModSync {
             Save(planned);
 
             progress("Starting the helper...");
-            Process launcher = LaunchHelper("apply", true);
+            Process launcher;
+            try {
+                launcher = LaunchHelper("apply", true);
+            } catch(Exception) {
+                DropPlannedJournal(); // the helper can't start: don't leave a Planned journal behind
+                throw;
+            }
             ModManager.instance.StartCoroutine(QuitWhenHelperStarted(launcher, progress, closingText, () => {
                 DropPlannedJournal();
                 onFailed(HelperNotStarted);
@@ -166,6 +172,14 @@ namespace AMP.ModSync {
             journal = Load();
             ReportHelperLog();
             if(journal == null) return;
+
+            // AMP's own update finished: nothing to restore, so no helper on quit and no "Restore my mods"
+            if(journal.IsFinishedKeepOnly()) {
+                journal.state = SwapState.Restored;
+                Save(journal);
+                DeleteJournal();
+                return;
+            }
 
             // The helper may have died halfway: "Planned" with a touched op is not "nothing happened"
             if(journal.state == SwapState.Planned && journal.ops.Any(o => o.done || o.started)) {
