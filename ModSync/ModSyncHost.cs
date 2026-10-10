@@ -187,8 +187,8 @@ namespace AMP.ModSync {
                     Log.Info(Defines.SERVER, $"Mod sync: {client.ClientName} joins with differences: {report.detail}");
                 }
             } else if(report.status == JoinerStatus.Checking) {
-                ResendWhenMatched(server, client, client.modSyncPlatform);
                 if(!Transition(client, CHECKING, WAITING)) return;
+                ResendWhenMatched(server, client, client.modSyncPlatform); // after the transition: a pass that's already done resends at once and needs CHECKING
                 Task.Delay(CHECK_TIMEOUT_MS).ContinueWith(_ => OnCheckTimeout(server, client, mode));
             } else if(report.status == JoinerStatus.NeedsSetup) {
                 if(!Transition(client, SETUP, WAITING, CHECKING)) return;

@@ -21,6 +21,7 @@ namespace AMP.ModSync {
         internal const int SearchPageSize = 20;
         private const float StallSeconds = 60f; // a download whose progress doesn't move for this long is given up
         private const float CancelSeconds = 30f; // how long a cancelled download may take to stop writing before it is abandoned
+        private const float FinishSeconds = 300f; // how long a finished download's task may lag behind it before it is abandoned
 
         internal class DownloadResult {
             internal string error;  // null on success
@@ -281,19 +282,20 @@ namespace AMP.ModSync {
 
             float lastProgress = -1f, movedAt = Time.realtimeSinceStartup;
             // The operation stays "requesting" forever when mod.io has no download link: its task ending first means that
-            bool stalled = false;
+            bool stalled = false, cancelled = false;
             while(!operation.IsCompleted && !operation.task.IsCompleted) {
-                if(!stillWanted()) { operation.Cancel(); break; }
+                if(!stillWanted()) { cancelled = true; operation.Cancel(); break; }
                 if(operation.DownloadProgress != lastProgress) { lastProgress = operation.DownloadProgress; movedAt = Time.realtimeSinceStartup; progress(lastProgress); }
-                if(Time.realtimeSinceStartup - movedAt > StallSeconds) { stalled = true; operation.Cancel(); break; }
+                if(Time.realtimeSinceStartup - movedAt > StallSeconds) { stalled = cancelled = true; operation.Cancel(); break; }
                 yield return null;
             }
-            // A cancelled download still writes to the stream until its task ends; one that never ends (stuck asking for a link) is abandoned
-            float cancelledAt = Time.realtimeSinceStartup;
-            while(!operation.task.IsCompleted && Time.realtimeSinceStartup - cancelledAt < CancelSeconds) yield return null;
+            // A cancelled download still writes to the stream until its task ends; one that never ends (stuck asking for a link) is abandoned.
+            // A finished operation's task normally ends right after it, so it gets the longer wait before counting as failed.
+            float waitFrom = Time.realtimeSinceStartup, waitLimit = cancelled ? CancelSeconds : FinishSeconds;
+            while(!operation.task.IsCompleted && Time.realtimeSinceStartup - waitFrom < waitLimit) yield return null;
             if(!operation.task.IsCompleted) {
                 zip.Dispose();
-                Log.Warn(Defines.CLIENT, "mod.io: the download of " + id + " didn't stop within " + CancelSeconds + " s, abandoned.");
+                Log.Warn(Defines.CLIENT, "mod.io: the download of " + id + " didn't stop within " + waitLimit + " s, abandoned.");
                 if(!stillWanted()) { TryDelete(root); yield break; }
                 fail(stalled ? "the mod.io download stalled for " + StallSeconds + " s" : "the mod.io download didn't finish");
                 yield break;

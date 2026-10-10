@@ -266,6 +266,7 @@ namespace AMP {
         // Always called on the main thread
         internal static string joinPassword = ""; // the netclient's ConnectToken can't be read back; the mod swap needs it to reconnect
         internal static void JoinServer(NetamiteClient netClient, string password = "") {
+            if(ModSync.ModSwapClient.ClosePending) { ModSync.ModSyncClient.ShowNotice(ModSync.ModSwapClient.ClosePendingText); return; }
             joinPassword = password ?? "";
             // Stop the old client right away, a queued stop would run after the new client is set up and kill it instead
             if(clientInstance != null) StopClientImmediatly();
@@ -307,6 +308,7 @@ namespace AMP {
         }
 
         internal static void HostServer(uint maxPlayers, int port, string password, Action<string> callback) {
+            if(ModSync.ModSwapClient.ClosePending) { callback(ModSync.ModSwapClient.ClosePendingText); return; }
             StopClient();
             StopHost();
             ModSync.ModSyncHost.Prepare();

@@ -362,6 +362,7 @@ namespace AMP.ModSync {
             if(!state.values.ContainsKey("restartedFrom")) { failure = "the game hasn't been restarted by this script (no downloadAndRestart before)"; yield break; }
             if(!ModSwapClient.RejoinStarted) { failure = "this start didn't rejoin by itself (the swap journal has no pending rejoin)"; yield break; }
             while(!(Greeted() && PlanEmpty())) yield return Poll;
+            yield return new WaitForSecondsRealtime(3f); // the client tells the host its level right after the greeting; a quit before that looks like a failed join
         }
 
         private static IEnumerator ExpectModFolder(AutopilotStep step) {

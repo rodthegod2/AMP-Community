@@ -20,6 +20,7 @@ namespace AMP.ModSync {
         private static readonly MessageAssembler assembler = new MessageAssembler();
         private const int QuestWaitMs = 45 * 1000; // a host still matching Quest versions sends its list again within 30 s
         private static int questWait;              // changes when a newer list arrives or the connection resets: an older wait gives up
+        private static int planning;               // 1 once this connection planned with a list: a late resend must not replace a plan in use
 
         // The connection that is waiting for the player to decide; once it is gone (or replaced) nobody is waiting
         private static ClientType awaitingClient;
@@ -35,6 +36,7 @@ namespace AMP.ModSync {
         // Main thread, when a new connection starts: nothing of the previous server may leak into it
         internal static void Reset() {
             Interlocked.Increment(ref questWait);
+            Interlocked.Exchange(ref planning, 0);
             assembler.Forget("");
             ModTransferClient.Cancel();
             ModSwapClient.Reset();
@@ -64,6 +66,10 @@ namespace AMP.ModSync {
                 return;
             }
             if(set == null) return;
+            if(Volatile.Read(ref planning) == 1) {
+                Log.Info(Defines.CLIENT, "Mod sync: the host's updated mod list came after planning started, keeping the current plan.");
+                return;
+            }
 
             // Tells the host not to give up on us while a big first scan runs (and our platform), and the player why nothing happens yet
             Report(client, JoinerStatus.Checking, "");
@@ -86,6 +92,7 @@ namespace AMP.ModSync {
         }
 
         private static void PlanAndHandle(ClientType client, HostModSet set) {
+            if(Interlocked.Exchange(ref planning, 1) == 1) return;
             string modsFolder  = ModSyncPaths.ModsFolder;
             string cacheFolder = ModSyncPaths.CacheFolder;
             string platform    = ModSyncPaths.Platform;
@@ -122,7 +129,9 @@ namespace AMP.ModSync {
                         Log.Warn(Defines.CLIENT, "Mod sync: " + step.hostMod.name + " (mod.io " + step.modioId + ") isn't available for " + ModSyncPaths.Platform + ": " + file.error);
                         step.action = SyncAction.Unavailable;
                     } else {
-                        Log.Warn(Defines.CLIENT, "Mod sync: couldn't look up mod.io " + step.modioId + " (" + step.hostMod.name + "): " + (file == null ? "no answer" : file.error));
+                        // mod.io isn't answering: asking for each remaining mod could take minutes (and the host times the check out); the download reports it
+                        Log.Warn(Defines.CLIENT, "Mod sync: couldn't look up mod.io " + step.modioId + " (" + step.hostMod.name + "): " + (file == null ? "no answer" : file.error) + ". Skipping the remaining lookups.");
+                        break;
                     }
                     continue;
                 }

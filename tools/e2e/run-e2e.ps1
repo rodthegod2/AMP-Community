@@ -175,7 +175,7 @@ $Scenarios = [ordered]@{
                      @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 300 }, @{ step = 'expectRejoined'; timeout = 300 },
                      @{ step = 'expectModFolder'; folder = $SloMo; present = $true }, @{ step = 'killGame' },
                      @{ step = 'expectStartupRestore'; folder = $SloMo; timeout = 300 }, @{ step = 'quit' })
-        Expect   = @{ reports = @('needs_setup', 'ready'); notServed = @($SloMo, $Dummy); greetings = 1; lingerSec = 10 }
+        Expect   = @{ reports = @('needs_setup', 'ready'); notServed = @($SloMo, $Dummy); greetings = 1; sendQuestIds = @{ $SloMo = $SloMoId; $Dummy = -1 }; lingerSec = 10 }
     }
 }
 

@@ -263,6 +263,8 @@ namespace AMP.ModSync {
 
         internal static bool ClosingForRestart { get; private set; } // Quest: the game closes by itself in a moment (tests)
         internal static bool RestoredAtStartup { get; private set; } // Quest: this start undid a swap the last session left behind (tests)
+        internal static bool ClosePending => RestoredAtStartup || ClosingForRestart; // the game is about to close: no hosting or joining
+        internal const string ClosePendingText = "Blade & Sorcery closes in a moment to load your own mods.\nStart it again, then join.";
 
         // Quest: the journal is applied right here (off the main thread, renames only), then the game closes; the next start rejoins.
         // Unverified on a headset: tested on PC with -amp-simulate-platform android and JSON-only mods (Application.Quit / quitting on Quest).
@@ -419,6 +421,7 @@ namespace AMP.ModSync {
                     if(RestoreInGame()) {
                         RestoredAtStartup = true;
                         closingForRestart = true; // nothing left for OnQuit to undo
+                        ModSyncClient.ShowNotice(ClosePendingText);
                         ModManager.instance.StartCoroutine(CloseAfterStartupRestore());
                     } else {
                         Notice(CanForget
