@@ -63,6 +63,14 @@ namespace AMP.UI {
         RectTransform modSyncPanel;
         TextMeshProUGUI modSyncText;
         GameObject modSyncJoinAnyway;
+        GameObject modSyncDownload;
+        GameObject modSyncModeToggle;
+        TextMeshProUGUI modSyncModeText;
+        GameObject restoreModsButton;
+        RectTransform modSyncTextRect;
+        #if AMP
+        ModSync.SwapMode swapMode = ModSync.SwapMode.Temporary;
+        #endif
         TextMeshProUGUI serverJoinCodeLabel;
         TextMeshProUGUI serverJoinCodeMessage;
         TextMeshProUGUI serverInfoMessage;
@@ -1192,6 +1200,7 @@ namespace AMP.UI {
             rect = gobj.GetComponent<RectTransform>();
             rect.sizeDelta = new Vector2(1000, 480);
             rect.localPosition = new Vector3(0, 30, 0);
+            modSyncTextRect = rect;
 
             gobj = CreateObject("ModSyncJoinAnyway");
             gobj.transform.SetParent(modSyncPanel);
@@ -1243,6 +1252,25 @@ namespace AMP.UI {
             btnText.fontSize = 55;
             btnText.color = Color.red;
             btnText.alignment = TextAlignmentOptions.Center;
+
+            #if AMP
+            // Only shown when the mods can be downloaded here (PC)
+            modSyncDownload = CreateModSyncButton(modSyncPanel, "ModSyncDownload", "Download & restart", new Vector3(-245, -165, 0), new Vector2(450, 110), 50, Color.black, () => {
+                ModSync.ModSwapClient.DownloadAndRestart(swapMode);
+            });
+            modSyncModeToggle = CreateModSyncButton(modSyncPanel, "ModSyncMode", "", new Vector3(245, -165, 0), new Vector2(450, 110), 50, Color.black, () => {
+                swapMode = swapMode == ModSync.SwapMode.Temporary ? ModSync.SwapMode.Keep : ModSync.SwapMode.Temporary;
+                UpdateConnectionScreen();
+            });
+            modSyncModeText = modSyncModeToggle.GetComponentInChildren<TextMeshProUGUI>();
+            modSyncDownload.SetActive(false);
+            modSyncModeToggle.SetActive(false);
+
+            restoreModsButton = CreateModSyncButton(transform, "RestoreMods", "Restore my mods", Vector3.zero, new Vector2(450, 100), 40, Color.black, () => {
+                ModSync.ModSwapClient.RestoreNow();
+            });
+            restoreModsButton.SetActive(false);
+            #endif
             #endregion
 
             #region Connecting
@@ -1564,6 +1592,17 @@ namespace AMP.UI {
                     break;
                 }
             }
+
+            #if AMP
+            // Offered next to the connection info and on the server list while a swap can still be undone
+            bool showRestore = ModSync.ModSwapClient.CanRestore && (page == Page.Disconnect || page == Page.Serverlist);
+            restoreModsButton.SetActive(showRestore);
+            if(showRestore) {
+                RectTransform restoreRect = restoreModsButton.GetComponent<RectTransform>();
+                restoreRect.sizeDelta = page == Page.Disconnect ? new Vector2(200, 150) : new Vector2(450, 100);
+                restoreRect.localPosition = page == Page.Disconnect ? new Vector3(-360, -260, 0) : new Vector3(320, -330, 0);
+            }
+            #endif
             FixSize();
         }
 
@@ -2856,10 +2895,79 @@ namespace AMP.UI {
 
         // Called by ModSyncClient on the main thread when the host's mods differ from ours
         internal void ShowModSync(string description, bool canJoinAnyway) {
+            #if AMP
+            bool canDownload = ModSync.ModSwapClient.CanDownload(ModSync.ModSyncClient.Plan);
+            bool busy = canDownload && ModSync.ModSwapClient.Busy;
+            if(!busy) {
+                modSyncText.text = canDownload ? description + ModSyncDownloadNote() : description;
+            }
+            // Room for the download buttons between the text and the old button row
+            modSyncTextRect.sizeDelta = new Vector2(1000, canDownload ? 360 : 480);
+            modSyncTextRect.localPosition = new Vector3(0, canDownload ? 90 : 30, 0);
+            modSyncDownload.SetActive(canDownload);
+            modSyncModeToggle.SetActive(canDownload);
+            modSyncModeText.text = "Mode: " + swapMode;
+            SetModSyncButtonsEnabled(!busy);
+            #else
             modSyncText.text = description;
+            #endif
             modSyncJoinAnyway.SetActive(canJoinAnyway);
             ShowPage(Page.ModSync);
         }
+
+        #if AMP
+        // Called by ModSwapClient (main thread) while the mods download
+        internal void ShowModSyncProgress(string text) {
+            modSyncText.text = text;
+            SetModSyncButtonsEnabled(false);
+        }
+
+        private void SetModSyncButtonsEnabled(bool enabled) {
+            foreach(GameObject button in new[] { modSyncDownload, modSyncModeToggle, modSyncJoinAnyway }) {
+                Button component = button.GetComponent<Button>();
+                if(component != null) component.interactable = enabled;
+            }
+        }
+
+        private string ModSyncDownloadNote() {
+            string note = "\n\n" + (swapMode == ModSync.SwapMode.Temporary
+                ? "Temporary: your own mods come back when you quit the game."
+                : "Keep: the host's mods stay installed. \"Restore my mods\" undoes it.");
+            note += "\nCharacters keep items only from mods that are installed — use a separate character for multiplayer.";
+            if(ModSync.ModSwapClient.LastError.Length > 0) note += "\n\n" + ModSync.ModSwapClient.LastError;
+            return note;
+        }
+
+        private GameObject CreateModSyncButton(Transform parent, string name, string label, Vector3 position, Vector2 size, int fontSize, Color textColor, UnityEngine.Events.UnityAction onClick) {
+            GameObject gobj = CreateObject(name);
+            gobj.transform.SetParent(parent, false);
+            RectTransform rect = gobj.AddComponent<RectTransform>();
+            rect.sizeDelta = size;
+            rect.localPosition = position;
+            Button btn = gobj.AddComponent<Button>();
+            btn.targetGraphic = gobj.AddComponent<Image>();
+            btn.targetGraphic.color = new Color(1, 1, 1, 0.6f);
+            btn.colors = buttonColor;
+            btn.onClick.AddListener(onClick);
+
+            GameObject text = CreateObject("Text");
+            text.transform.SetParent(btn.transform, false);
+            rect = text.AddComponent<RectTransform>();
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+            TextMeshProUGUI btnText = text.AddComponent<TextMeshProUGUI>();
+            btnText.text = label;
+            btnText.fontSize = fontSize;
+            btnText.enableAutoSizing = true;
+            btnText.fontSizeMin = 18;
+            btnText.fontSizeMax = fontSize;
+            btnText.color = textColor;
+            btnText.alignment = TextAlignmentOptions.Center;
+            return gobj;
+        }
+        #endif
 
         // Port, password and max players come from inputCache in config.json (host_port, host_password, host_max_players)
         private IEnumerator HostOnThisPC() {

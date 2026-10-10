@@ -32,6 +32,7 @@ namespace AMP.ModSync {
         internal static void Reset() {
             assembler.Forget("");
             ModTransferClient.Cancel();
+            ModSwapClient.Reset();
             HostSet       = null;
             Plan           = null;
             awaitingClient = null;
@@ -152,7 +153,7 @@ namespace AMP.ModSync {
             }
         }
 
-        private static void ShowNotice(string text) {
+        internal static void ShowNotice(string text) {
             TextDisplay.ShowTextDisplay(new DisplayTextPacket("modsync", text, Color.yellow, Vector3.forward * 2, true, true, 15));
         }
     }

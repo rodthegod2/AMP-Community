@@ -105,6 +105,9 @@ namespace AMP {
             }
             try {
                 ModSync.ModSyncPaths.Init();
+                Application.quitting -= ModSync.ModSwapClient.OnQuit;
+                Application.quitting += ModSync.ModSwapClient.OnQuit;
+                ModSync.ModSwapClient.OnStartup();
             } catch(Exception e) {
                 Log.Err(Defines.AMP, "Mod sync unavailable: " + e.Message);
             }
@@ -258,7 +261,9 @@ namespace AMP {
         }
 
         // Always called on the main thread
+        internal static string joinPassword = ""; // the netclient's ConnectToken can't be read back; the mod swap needs it to reconnect
         internal static void JoinServer(NetamiteClient netClient, string password = "") {
+            joinPassword = password ?? "";
             // Stop the old client right away, a queued stop would run after the new client is set up and kill it instead
             if(clientInstance != null) StopClientImmediatly();
             ModSync.ModSyncClient.Reset();
