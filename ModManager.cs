@@ -113,6 +113,7 @@ namespace AMP {
             }
             ModSync.ProfileSwitch.ApplyAtStartup(); // before the settings snapshot, so it reads the multiplayer profile's options
             StartCoroutine(ModSync.SettingsSyncClient.StartupRoutine());
+            StartCoroutine(ModSync.ReleaseUpdater.CheckRoutine());
             if(safeFile.modSettings.useBrowserIntegration) {
                 WebSocketInteractor.Start();
             }

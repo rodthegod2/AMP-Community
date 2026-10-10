@@ -855,6 +855,23 @@ internal static class Program {
             && ReleaseInfo.IsTrustedUrl("https://objects.githubusercontent.com/x") && ReleaseInfo.IsTrustedUrl("https://release-assets.githubusercontent.com/x"));
         T("http or lookalike urls are not trusted", !ReleaseInfo.IsTrustedUrl("http://github.com/x") && !ReleaseInfo.IsTrustedUrl("https://github.com.evil.com/x")
             && !ReleaseInfo.IsTrustedUrl("https://evil.com/github.com") && !ReleaseInfo.IsTrustedUrl("https://github.com@evil.com/x") && !ReleaseInfo.IsTrustedUrl(null));
+
+        T("owner/name repos are valid", ReleaseInfo.IsValidRepo("rodthegod2/AMP-Community") && ReleaseInfo.IsValidRepo("a.b_c/d-e"));
+        T("other repo strings are invalid", !ReleaseInfo.IsValidRepo(null) && !ReleaseInfo.IsValidRepo("") && !ReleaseInfo.IsValidRepo("owner")
+            && !ReleaseInfo.IsValidRepo("a/b/c") && !ReleaseInfo.IsValidRepo("a/b?x=1") && !ReleaseInfo.IsValidRepo("../evil") && !ReleaseInfo.IsValidRepo("a/b\n"));
+
+        long now = new DateTime(2026, 10, 10, 12, 0, 0, DateTimeKind.Utc).Ticks;
+        T("a check is due when there was none", ReleaseInfo.CheckDue(0, now));
+        T("no new check within 6 hours", !ReleaseInfo.CheckDue(now - TimeSpan.FromHours(5).Ticks, now));
+        T("a check is due after 6 hours", ReleaseInfo.CheckDue(now - TimeSpan.FromHours(6).Ticks, now));
+        T("a check time in the future (clock change) is due", ReleaseInfo.CheckDue(now + TimeSpan.FromHours(1).Ticks, now));
+
+        var local = new ModEntry { folder = "MultiplayerMod", isAmp = true, enabled = true };
+        var fresh = new ModEntry { folder = "MultiplayerMod", isAmp = true, enabled = true, hash = new string('c', 64) };
+        SwapJournal update = JournalPlanner.BuildAmpUpdate(fresh, local);
+        T("AMP update: move aside then install, both kept", update.ops.Count == 2 && update.ops[0].kind == SwapOpKind.MoveAside && update.ops[0].folder == "MultiplayerMod" && update.ops[0].keep
+            && update.ops[1].kind == SwapOpKind.Install && update.ops[1].hash == fresh.hash && update.ops[1].folder == "MultiplayerMod" && update.ops[1].keep);
+        T("AMP update: nothing to rejoin, no load order change", !update.rejoinPending && update.host == "" && update.ops.All(o => o.kind != SwapOpKind.LoadOrder));
     }
 
     // Pairs of entry name and text

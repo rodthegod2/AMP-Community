@@ -82,6 +82,17 @@ namespace AMP.ModSync {
             return uri.Scheme == Uri.UriSchemeHttps && uri.IsDefaultPort && TrustedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase);
         }
 
+        // "owner/name" as GitHub spells it; the setting comes from a config file and ends up in a URL
+        public static bool IsValidRepo(string repo) {
+            return repo != null && System.Text.RegularExpressions.Regex.IsMatch(repo, @"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z")
+                   && !repo.Contains("..");
+        }
+
+        // GitHub allows 60 anonymous requests per hour; one check every few hours is plenty
+        public static bool CheckDue(long lastCheckUtcTicks, long nowUtcTicks) {
+            return lastCheckUtcTicks <= 0 || lastCheckUtcTicks > nowUtcTicks || nowUtcTicks - lastCheckUtcTicks >= TimeSpan.FromHours(6).Ticks;
+        }
+
         private static int[] ParseVersion(string version) {
             var parts = new int[4];
             string[] split = (version ?? "").Split('.');

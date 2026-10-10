@@ -33,7 +33,10 @@ namespace AMP.Data {
             public float minPredictionTreshhold = 0.15f;
             // Size limit of the downloaded-mods cache (AMP_ModCache)
             public int   modCacheMaxMB          = 8192;
-            
+            // Look for a newer AMP release on GitHub at startup (PC, not for mod.io installs) and offer "Update AMP"
+            public bool   checkForUpdates       = true;
+            public string updateRepo            = "rodthegod2/AMP-Community"; // owner/name
+
             public bool ShouldPredict(float compensationFactor) {
                 return ModLoader.ClientsidePrediction && compensationFactor > minPredictionTreshhold;
             }

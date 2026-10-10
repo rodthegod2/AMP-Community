@@ -21,5 +21,15 @@ namespace AMP.ModSync {
                 journal.ops.Add(new SwapOp { kind = SwapOpKind.LoadOrder });
             return journal;
         }
+
+        // AMP replaces its own folder with a new build (an AMP update from a release): one kept pair of ops, nothing to rejoin afterwards.
+        // newAmp.folder is where the new build is installed; newAmp.hash names the cache entry.
+        public static SwapJournal BuildAmpUpdate(ModEntry newAmp, ModEntry localAmp) {
+            var plan = new SyncPlan();
+            plan.steps.Add(new SyncStep { action = SyncAction.Replace, hostMod = newAmp, localMod = localAmp, source = "host" });
+            SwapJournal journal = Build(plan, null, "", 0, "", SwapMode.Keep);
+            journal.rejoinPending = false;
+            return journal;
+        }
     }
 }

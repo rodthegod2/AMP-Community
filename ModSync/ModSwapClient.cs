@@ -56,7 +56,7 @@ namespace AMP.ModSync {
         #region Download & restart
 
         internal static void DownloadAndRestart(SwapMode mode) {
-            if(busy || Time.realtimeSinceStartup < retryAt) return;
+            if(busy || ReleaseUpdater.Busy || Time.realtimeSinceStartup < retryAt) return;
             SyncPlan plan = ModSyncClient.Plan;
             HostModSet set = ModSyncClient.HostSet;
             if(!CanDownload(plan)) return;
@@ -100,13 +100,19 @@ namespace AMP.ModSync {
 
             SwapJournal planned = JournalPlanner.Build(plan, set.loadOrder, host, port, password, mode);
             planned.rejoinPending = isIp && port > 0; // a Steam lobby can't be rejoined by address: the player joins again by hand
+            ApplyJournal(planned, Progress, "Closing the game to install the mods...\nIt reopens and reconnects by itself.", Fail);
+        }
+
+        // Saves the journal, starts the helper and closes the game once Windows confirms the helper runs (the helper applies the journal and relaunches).
+        // Also used for AMP's own updates. Throws if the helper can't be prepared; onFailed gets the message when it didn't start (nothing was changed).
+        internal static void ApplyJournal(SwapJournal planned, Action<string> progress, string closingText, Action<string> onFailed) {
             Save(planned);
 
-            Progress("Starting the helper...");
+            progress("Starting the helper...");
             Process launcher = LaunchHelper("apply", true);
-            ModManager.instance.StartCoroutine(QuitWhenHelperStarted(launcher, () => {
+            ModManager.instance.StartCoroutine(QuitWhenHelperStarted(launcher, progress, closingText, () => {
                 DropPlannedJournal();
-                Fail(HelperNotStarted);
+                onFailed(HelperNotStarted);
             }));
         }
 
@@ -114,14 +120,14 @@ namespace AMP.ModSync {
 
         // The launcher is a short-lived powershell that asks WMI to create the helper and exits with 0 once Windows has done so.
         // Only then is it safe to close the game: the helper waits for it and takes over.
-        private static IEnumerator QuitWhenHelperStarted(Process launcher, Action onFailed) {
+        private static IEnumerator QuitWhenHelperStarted(Process launcher, Action<string> progress, string closingText, Action onFailed) {
             float waited = 0f;
             while(launcher != null && !launcher.HasExited && waited < 10f) {
                 yield return new WaitForSecondsRealtime(0.2f);
                 waited += 0.2f;
             }
             if(launcher != null && launcher.HasExited && launcher.ExitCode == 0) {
-                Progress("Closing the game to install the mods...\nIt reopens and reconnects by itself.");
+                progress(closingText);
                 Application.Quit();
                 yield break;
             }
@@ -224,7 +230,7 @@ namespace AMP.ModSync {
                 Save(journal);
                 Notice("Starting the helper to restore your mods...");
                 Process launcher = LaunchHelper("restore", true);
-                ModManager.instance.StartCoroutine(QuitWhenHelperStarted(launcher, () => {
+                ModManager.instance.StartCoroutine(QuitWhenHelperStarted(launcher, Progress, "Closing the game to restore your mods...", () => {
                     RestoreState(before);
                     busy = false;
                     Notice(HelperNotStarted);
@@ -391,7 +397,7 @@ namespace AMP.ModSync {
         }
 
         // The enabled mod folder that holds the AMP that is running now
-        private static string FindAmpFolder() {
+        internal static string FindAmpFolder() {
             System.Reflection.Assembly mine = typeof(ModSwapClient).Assembly;
             foreach(ThunderRoad.ModManager.ModData mod in ThunderRoad.ModManager.loadedMods) {
                 if(mod.assemblies != null && mod.assemblies.Contains(mine) && !string.IsNullOrEmpty(mod.fullPath) && File.Exists(Path.Combine(mod.fullPath, "AMP.dll"))) return mod.fullPath;

@@ -67,6 +67,9 @@ namespace AMP.UI {
         GameObject modSyncModeToggle;
         TextMeshProUGUI modSyncModeText;
         GameObject restoreModsButton;
+        GameObject updateAmpButton;
+        TextMeshProUGUI updateAmpLabel;
+        TextMeshProUGUI updateAmpStatus;
         RectTransform modSyncTextRect;
         #if AMP
         ModSync.SwapMode swapMode = ModSync.SwapMode.Temporary;
@@ -1271,6 +1274,26 @@ namespace AMP.UI {
                 restoreModsButton.GetComponentInChildren<TextMeshProUGUI>().text = ModSync.ModSwapClient.RestoreButtonLabel;
             });
             restoreModsButton.SetActive(false);
+
+            // AMP's own update from GitHub (see ModSync/ReleaseUpdater.cs), server list page only
+            updateAmpButton = CreateModSyncButton(transform, "UpdateAmp", "Update AMP", new Vector3(320, -205, 0), new Vector2(450, 90), 40, Color.black, () => {
+                ModSync.ReleaseUpdater.UpdateNow();
+            });
+            updateAmpLabel = updateAmpButton.GetComponentInChildren<TextMeshProUGUI>();
+            gobj = CreateObject("UpdateAmpStatus");
+            gobj.transform.SetParent(transform, false);
+            updateAmpStatus = gobj.AddComponent<TextMeshProUGUI>();
+            updateAmpStatus.fontSize = 26;
+            updateAmpStatus.enableAutoSizing = true;
+            updateAmpStatus.fontSizeMin = 14;
+            updateAmpStatus.fontSizeMax = 26;
+            updateAmpStatus.color = Color.black;
+            updateAmpStatus.alignment = TextAlignmentOptions.Center;
+            rect = gobj.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(450, 70);
+            rect.localPosition = new Vector3(320, -270, 0);
+            updateAmpButton.SetActive(false);
+            updateAmpStatus.gameObject.SetActive(false);
             #endif
             #endregion
 
@@ -1609,9 +1632,29 @@ namespace AMP.UI {
                 restoreRect.sizeDelta = page == Page.Disconnect ? new Vector2(200, 150) : new Vector2(450, 100);
                 restoreRect.localPosition = page == Page.Disconnect ? new Vector3(-360, -260, 0) : new Vector3(320, -330, 0);
             }
+            RefreshUpdateAmp();
             #endif
             FixSize();
         }
+
+        #if AMP
+        // The "Update AMP" button and its progress/error text; called when the page changes and by ReleaseUpdater (main thread)
+        internal void RefreshUpdateAmp() {
+            if(updateAmpButton == null) return;
+            ModSync.ReleaseInfo release = ModSync.ReleaseUpdater.Available;
+            bool onList = currentPage == Page.Serverlist;
+            bool busy = ModSync.ReleaseUpdater.Busy;
+            bool showButton = onList && release != null && (busy || ModSync.ReleaseUpdater.CanOfferUpdate);
+            updateAmpButton.SetActive(showButton);
+            if(showButton) {
+                updateAmpLabel.text = "Update AMP (v" + release.version + ")";
+                updateAmpButton.GetComponent<Button>().interactable = !busy;
+            }
+            string status = ModSync.ReleaseUpdater.Status;
+            updateAmpStatus.gameObject.SetActive(onList && status.Length > 0);
+            updateAmpStatus.text = status;
+        }
+        #endif
 
         private ScrollRect CreateScrollRect(string name, bool gridLayout) {
             GameObject gScrollRect = CreateObject(name);
