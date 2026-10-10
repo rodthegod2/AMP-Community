@@ -80,6 +80,8 @@ namespace AMP.UI {
         TextMeshProUGUI serverJoinCodeLabel;
         TextMeshProUGUI serverJoinCodeMessage;
         TextMeshProUGUI serverInfoMessage;
+        TextMeshProUGUI hostNatInfo;
+        string shownHostCode = ""; // the join code the connection page shows while hosting by IP (cleared when that ends)
         TextMeshProUGUI serverDebugMessage;
         RectTransform disconnectButton;
         RectTransform moderationButton;
@@ -438,7 +440,7 @@ namespace AMP.UI {
             text = CreateObject("Text");
             text.transform.SetParent(btn.transform);
             btnText = text.AddComponent<TextMeshProUGUI>();
-            btnText.text = "Direct (IP)";
+            btnText.text = "Join Code / IP";
             btnText.color = Color.black;
             btnText.fontSize = 35;
             btnText.alignment = TextAlignmentOptions.Center;
@@ -667,7 +669,7 @@ namespace AMP.UI {
             gobj = CreateObject("IpAddressInfoLabel");
             gobj.transform.SetParent(joinIpPanel);
             textMesh = gobj.AddComponent<TextMeshProUGUI>();
-            textMesh.text = "Address:";
+            textMesh.text = "Code or IP:";
             textMesh.fontSize = 30;
             textMesh.color = Color.black;
             textMesh.alignment = TextAlignmentOptions.Center;
@@ -1145,6 +1147,20 @@ namespace AMP.UI {
             rect = gobj.GetComponent<RectTransform>();
             rect.sizeDelta = new Vector2(1000, 50);
             rect.localPosition = new Vector3(0, -150, 0);
+
+            // Hosting by IP: the other join code, the plain address, what the router said, the firewall note
+            gobj = CreateObject("HostNatInfo");
+            gobj.transform.SetParent(disconnectPanel);
+            hostNatInfo = gobj.AddComponent<TextMeshProUGUI>();
+            hostNatInfo.text = "";
+            hostNatInfo.color = Color.black;
+            hostNatInfo.alignment = TextAlignmentOptions.Center;
+            hostNatInfo.enableAutoSizing = true;
+            hostNatInfo.fontSizeMin = 16;
+            hostNatInfo.fontSizeMax = 30;
+            rect = gobj.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(1000, 130);
+            rect.localPosition = new Vector3(0, -10, 0);
 
             gobj = CreateObject("DebugInfo");
             gobj.transform.SetParent(disconnectPanel);
@@ -1793,6 +1809,7 @@ namespace AMP.UI {
                 if(ModSync.ProfileSwitch.Active) info += "\nMultiplayer profile (separate characters) - your own saves are untouched.";
                 serverInfoMessage.text = info;
                 RefreshQuestMatch();
+                UpdateHostCodes();
 
                 #if DEBUG
                 try {
@@ -2585,7 +2602,7 @@ namespace AMP.UI {
                 Dispatcher.Enqueue(() => {
                     currentUI.StartCoroutine(FailedConnectionCoroutine(reason));
                 });
-                ModManager.clientInstance.netclient.OnConnect += () => {
+                if(ModManager.clientInstance?.netclient != null) ModManager.clientInstance.netclient.OnConnect += () => {
                     Dispatcher.Enqueue(UpdateConnectionScreen);
                 };
             };
@@ -2612,7 +2629,7 @@ namespace AMP.UI {
             else if ("CONNECTION_TIMEOUT".Equals(reason)) reason = "Lost connection to the server (nothing received for 15 seconds)";
             else if ("Connection failed.".Equals(reason) || "Connection timed out.".Equals(reason)) {
                 string address = $"{ModManager.guiManager.join_ip}:{ModManager.guiManager.join_port}";
-                reason = $"Can't reach {address}.\nCheck the address, that the host is running,\nand that TCP and UDP port {ModManager.guiManager.join_port} are forwarded (or use a VPN like Tailscale).";
+                reason = $"Can't reach {address}.\nCheck the code or address and that the host is running.\nOver the internet: the host's AMP page must say the port is open (else the host forwards TCP and UDP port {ModManager.guiManager.join_port}, or use a VPN like Tailscale).";
             }
             else if ("CONNECTION_CLOSED".Equals(reason)) yield break;
 
@@ -2837,8 +2854,11 @@ namespace AMP.UI {
         private IEnumerator IpJoin(string address, string port, string password) {
             ShowPage(Page.Connecting);
 
-            if (address != null && address.Length > 0 && port != null && port.Length > 0) {
-                connectingMessage.text = "Connecting to server...";
+            // A join code or an address (GUIManager.JoinServer reads both); a typo is shown here instead of a failed connection
+            string error = null;
+            if (Network.Nat.JoinTarget.TryParse(address, port, out string host, out int portNumber, out error)) {
+                connectingMessage.color = Color.black;
+                connectingMessage.text = $"Connecting to {host}:{portNumber}...";
                 serverJoinCodeLabel.gameObject.SetActive(false);
                 serverJoinCodeMessage.gameObject.SetActive(false);
 
@@ -2849,7 +2869,7 @@ namespace AMP.UI {
                 UpdateConnectionScreen();
             }
             else {
-                connectingMessage.text = "Cannot connect to server! Did you enter the correct information?";
+                connectingMessage.text = error;
                 connectingMessage.color = Color.red;
 
                 yield return new WaitForSeconds(5);
@@ -3011,6 +3031,36 @@ namespace AMP.UI {
             if(candidate != null) questMatchText.text = "Quest version of \"" + candidate.modName + "\"?\nmod.io: \"" + candidate.modio.name + "\" by " + candidate.modio.author;
         }
 
+        // Hosting by IP: the big Internet code (the Same Wi-Fi code when there is none), then the other code, the plain address and
+        // what the router said. Hidden while a Quest match question uses that space.
+        private void UpdateHostCodes() {
+            Network.Nat.PortMapStatus nat = Network.Nat.HostPortMapping.Status;
+            if(nat == null) {
+                if(shownHostCode.Length > 0 && serverJoinCodeMessage.text == shownHostCode) {
+                    serverJoinCodeMessage.text = "";
+                    serverJoinCodeMessage.fontSize = 160;
+                    serverJoinCodeLabel.text = "Join Code:";
+                }
+                shownHostCode = "";
+                hostNatInfo.gameObject.SetActive(false);
+                return;
+            }
+            string internet = nat.InternetCode, lan = Network.Nat.HostPortMapping.LanCode;
+            shownHostCode = internet ?? lan ?? "";
+            serverJoinCodeLabel.text = internet != null ? "Internet code:" : "Same Wi-Fi code:";
+            serverJoinCodeMessage.text = shownHostCode;
+            serverJoinCodeMessage.fontSize = shownHostCode.Length > 9 ? 110 : 160;
+            serverJoinCodeMessage.gameObject.SetActive(true);
+
+            var lines = new List<string>();
+            if(internet != null && lan != null) lines.Add("Same Wi-Fi code: " + lan);
+            string wifiAddress = (nat.LocalIp?.ToString() ?? "unknown") + ":" + nat.Port;
+            lines.Add(internet != null ? $"IP: {nat.ExternalIp}:{nat.Port} (internet), {wifiAddress} (same Wi-Fi)" : "IP: " + wifiAddress);
+            lines.AddRange(nat.Describe());
+            hostNatInfo.text = string.Join("\n", lines);
+            hostNatInfo.gameObject.SetActive(questMatchText == null || !questMatchText.gameObject.activeSelf);
+        }
+
         private void AnswerQuestMatch(bool yes) {
             ModSync.QuestMatcher.Answer(ModSync.QuestMatcher.Current, yes);
             RefreshQuestMatch();
@@ -3081,13 +3131,8 @@ namespace AMP.UI {
         private static string localNetworkAddress;
         private static string LocalNetworkAddress() {
             if(localNetworkAddress != null) return localNetworkAddress;
-            try {
-                System.Net.IPAddress address = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName()).AddressList
-                    .FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !System.Net.IPAddress.IsLoopback(a));
-                localNetworkAddress = address?.ToString() ?? "unknown";
-            } catch(Exception) {
-                localNetworkAddress = "unknown";
-            }
+            // The interface that reaches the internet (a VM/WSL adapter first in the DNS list would be wrong)
+            localNetworkAddress = Network.Nat.LocalAddress.Lan()?.ToString() ?? "unknown";
             return localNetworkAddress;
         }
     }

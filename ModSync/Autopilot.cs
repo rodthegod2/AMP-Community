@@ -159,6 +159,8 @@ namespace AMP.ModSync {
                 case "expectCachedModio":   return ExpectCachedModio(step);
                 case "killGame":            return KillGame(n, state, statePath);
                 case "expectStartupRestore": return ExpectStartupRestore(step);
+                case "expectPortMapping":   return ExpectPortMapping(step);
+                case "writeJoinCode":       return WriteJoinCode(step);
                 case "quit":                return Nothing(); // the end of the script reports DONE and quits
                 default: throw new InvalidOperationException("unknown step " + step.Name);
             }
@@ -185,7 +187,7 @@ namespace AMP.ModSync {
         }
 
         private static IEnumerator Join(AutopilotStep step) {
-            GUIManager.JoinServer(step.Str("address"), step.Int("port").ToString(), step.Str("password", ""), false);
+            GUIManager.JoinServer(step.Str("address"), step.Int("port", 0).ToString(), step.Str("password", ""), false);
             ClientType client = ModManager.clientInstance;
             if(client == null) { failure = "joining didn't start (invalid address or port?)"; yield break; }
 
@@ -194,6 +196,37 @@ namespace AMP.ModSync {
                 if(ModManager.clientInstance != client) { failure = "the connection closed before joining finished"; yield break; }
                 yield return Poll;
             }
+        }
+
+        // The router work runs in the background: wait until it has an answer
+        private static IEnumerator ExpectPortMapping(AutopilotStep step) {
+            Network.Nat.PortMapStatus status;
+            while((status = Network.Nat.HostPortMapping.Status) == null || status.State == Network.Nat.MapState.Searching) {
+                if(ModManager.serverInstance == null) { failure = "not hosting"; yield break; }
+                yield return Poll;
+            }
+            Debug.Log(Prefix + "INFO port mapping " + status.State + (status.Detail.Length > 0 ? " (" + status.Detail + ")" : "") + ", router '" + status.Router + "', lease " + status.LeaseSeconds
+                      + ", internet code " + (status.InternetCode ?? "none") + ", lan code " + (Network.Nat.HostPortMapping.LanCode ?? "none") + " | " + string.Join(" | ", status.Describe().ToArray()));
+            if(status.State.ToString() != step.Str("state")) failure = "port mapping is " + status.State + ", expected " + step.Str("state");
+        }
+
+        private static IEnumerator WriteJoinCode(AutopilotStep step) {
+            string kind = step.Str("kind"), file = step.Str("file"), code = null;
+            if(kind != "lan" && kind != "internet") { failure = "kind must be lan or internet"; yield break; }
+            if(!Path.IsPathRooted(file)) { failure = "file must be an absolute path"; yield break; }
+            while(code == null) {
+                Network.Nat.PortMapStatus status = Network.Nat.HostPortMapping.Status;
+                if(status == null) { failure = "not hosting by IP"; yield break; }
+                if(status.State != Network.Nat.MapState.Searching) {
+                    code = kind == "lan" ? Network.Nat.HostPortMapping.LanCode : status.InternetCode;
+                    if(code == null) { failure = "there is no " + kind + " code (port mapping " + status.State + ")"; yield break; }
+                }
+                if(code == null) yield return Poll;
+            }
+            File.WriteAllText(file + ".tmp", code);
+            if(File.Exists(file)) File.Delete(file);
+            File.Move(file + ".tmp", file); // the bot never reads half a code
+            Debug.Log(Prefix + "INFO " + kind + " join code " + code + " written to " + file);
         }
 
         private static IEnumerator WaitPlayers(AutopilotStep step) {

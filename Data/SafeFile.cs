@@ -72,6 +72,8 @@ namespace AMP.Data {
             public int      maxModTransferMB       = 4096;
             // Quest versions of the host's mods, by mod folder (see ModSync/ModMatcher.cs). Filled when hosting starts; modioId 0 = no Quest version
             public Dictionary<string, ModSync.ModMatch> modMatches = new Dictionary<string, ModSync.ModMatch>();
+            // "Host on PC" opens the port on the router by itself (UPnP) and removes it when hosting stops
+            public bool     autoPortForward        = true;
 
             
             public bool useModWhitelist            = false;

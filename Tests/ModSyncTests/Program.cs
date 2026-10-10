@@ -5,7 +5,7 @@ using System.IO.Compression;
 using System.Linq;
 using AMP.ModSync;
 
-internal static class Program {
+internal static partial class Program {
     private static int fails;
 
     private static void T(string name, bool ok) {
@@ -13,7 +13,8 @@ internal static class Program {
         if(!ok) fails++;
     }
 
-    private static int Main() {
+    private static int Main(string[] args) {
+        if(args.Length >= 1 && args[0] == "--real-router") return RealRouter(args);
         InventoryTests();
         PlannerTests();
         ChunkTests();
@@ -35,6 +36,7 @@ internal static class Program {
         QuestTests();
         QuestFlowTests();
         ReviewFixTests();
+        NatTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }

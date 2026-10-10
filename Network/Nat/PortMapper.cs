@@ -1,0 +1,256 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Threading;
+
+namespace AMP.Network.Nat {
+    public enum MapState {
+        Off,        // turned off (config, or a test run without a fake router)
+        Searching,
+        NoRouter,   // nothing answered the UPnP search
+        Open,       // the port is open on the router (by AMP, or already forwarded to this PC by hand)
+        Refused,    // the router answered but didn't open the port
+        Shared,     // the router's internet address is private/CGNAT: nobody on the internet can reach it
+        NoInternet, // the router has no internet address
+        Failed,     // the router stopped answering or answered nonsense
+    }
+
+    // What the UI shows; replaced as a whole (never changed in place), so the main thread can read it any time
+    public class PortMapStatus {
+        public MapState State = MapState.Searching;
+        public int Port;
+        public IPAddress LocalIp, ExternalIp;
+        public string Router = "", ServiceType = "", Detail = "";
+        public int LeaseSeconds;       // of the mappings AMP made (0 = until AMP removes them)
+        public bool ForwardedByHand;   // the port was already forwarded to this PC (AMP leaves that mapping alone)
+
+        public PortMapStatus With(Action<PortMapStatus> change) {
+            var copy = (PortMapStatus) MemberwiseClone();
+            change(copy);
+            return copy;
+        }
+
+        // A code friends on the internet can use: only when the router has a public address
+        public string InternetCode {
+            get { return ExternalIp != null && NatRules.Classify(ExternalIp) == AddressClass.Public && (State == MapState.Open || State == MapState.Refused) ? JoinCodes.Encode(ExternalIp, Port) : null; }
+        }
+
+        // Plain words for the host, one line each
+        public List<string> Describe() {
+            var lines = new List<string>();
+            switch(State) {
+                case MapState.Off:
+                    lines.Add("Automatic port opening is off" + (Detail.Length > 0 ? " (" + Detail + ")" : "") + ". Internet friends need port " + Port + " forwarded by hand.");
+                    break;
+                case MapState.Searching:
+                    lines.Add("Opening port " + Port + " on your router...");
+                    break;
+                case MapState.NoRouter:
+                    lines.Add("No router answered the automatic port opening (UPnP is off or not supported).");
+                    lines.Add("Internet joining: turn on UPnP in your router, or forward port " + Port + " (TCP+UDP) to this PC by hand.");
+                    break;
+                case MapState.Open:
+                    lines.Add(ForwardedByHand ? "Port " + Port + " is already forwarded to this PC on your router." : "Port " + Port + " was opened on your router automatically.");
+                    break;
+                case MapState.Refused:
+                    lines.Add("Your router refused to open port " + Port + (Detail.Length > 0 ? ": " + Detail : "") + ".");
+                    lines.Add("The Internet code only works after you forward port " + Port + " (TCP+UDP) to this PC by hand.");
+                    break;
+                case MapState.Shared:
+                    lines.Add("Your internet provider shares your IP: internet joining needs a relay (same Wi-Fi still works).");
+                    break;
+                case MapState.NoInternet:
+                    lines.Add("Your router says it isn't connected to the internet: only same Wi-Fi joining works.");
+                    break;
+                case MapState.Failed:
+                    lines.Add("Automatic port opening failed" + (Detail.Length > 0 ? ": " + Detail : "") + ".");
+                    break;
+            }
+            lines.Add("Windows may ask to allow Blade & Sorcery through the firewall: allow it.");
+            return lines;
+        }
+    }
+
+    // One hosting session's port mappings, on its own background thread:
+    //   discover -> external IP -> classify -> map TCP and UDP (lease, fallback 0) -> renew every lease/2 -> on Stop delete what it added.
+    // A mapping that already exists for this PC with another description (forwarded by hand) is used as it is and never deleted;
+    // a mapping to another device is reported, never replaced.
+    public class PortMapper {
+        public const string Description = "AMP Community";
+        public static readonly string[] Protocols = { "TCP", "UDP" };
+
+        public readonly int Port;
+        public int LeaseSeconds = 7200;
+        public int DiscoveryTimeoutMs = 3000;
+        public IPEndPoint SearchTarget = Ssdp.Multicast;
+
+        private volatile PortMapStatus status;
+        public PortMapStatus Status { get { return status; } }
+
+        private readonly Action<string> log;
+        private readonly ManualResetEvent stopRequested = new ManualResetEvent(false);
+        private readonly ManualResetEvent done = new ManualResetEvent(false);
+        private readonly List<string> added = new List<string>(); // protocols this session mapped (only these get deleted)
+        private Thread thread;
+        private IgdClient igd;
+        public int Renewals { get; private set; }
+
+        public PortMapper(int port, Action<string> log) {
+            Port = port;
+            this.log = log ?? (s => { });
+            status = new PortMapStatus { State = MapState.Searching, Port = port, LocalIp = LocalAddress.Lan() };
+        }
+
+        // previous: a session that is still cleaning up (a new host start on the same port waits for its deletes first)
+        public void Start(PortMapper previous = null) {
+            thread = new Thread(() => {
+                try {
+                    previous?.WaitDone(10000);
+                    Run();
+                } catch(Exception e) {
+                    log("UPnP: " + e);
+                    status = status.With(s => { s.State = MapState.Failed; s.Detail = e.Message; });
+                } finally {
+                    Cleanup();
+                    done.Set();
+                }
+            }) { IsBackground = true, Name = "AMP UPnP" };
+            thread.Start();
+        }
+
+        // Not started at all (turned off): the UI says why
+        public void TurnOff(string reason) {
+            status = status.With(s => { s.State = MapState.Off; s.Detail = reason ?? ""; });
+        }
+
+        public void Stop() { stopRequested.Set(); }
+
+        public bool WaitDone(int timeoutMs) { return thread == null || done.WaitOne(timeoutMs); }
+
+        private bool Stopping { get { return stopRequested.WaitOne(0); } }
+
+        // Renew halfway through the lease; a permanent mapping (lease 0) is never renewed
+        public static int RenewAfterSeconds(int leaseSeconds) {
+            return leaseSeconds > 0 ? Math.Max(1, leaseSeconds / 2) : -1;
+        }
+
+        private void Run() {
+            List<Uri> locations = Ssdp.Discover(SearchTarget, DiscoveryTimeoutMs, log);
+            if(Stopping) return;
+            log("UPnP: " + locations.Count + " device(s) answered");
+
+            igd = null;
+            IPAddress external = null;
+            foreach(Uri location in locations) {
+                IgdDescription device;
+                try {
+                    device = IgdDescription.Parse(Http.Get(location, 5000), location);
+                } catch(Exception e) {
+                    log("UPnP: can't read " + location + ": " + e.Message);
+                    continue;
+                }
+                foreach(IgdService service in device.Services) {
+                    var client = new IgdClient(device, service);
+                    IPAddress address;
+                    try {
+                        IPAddress.TryParse(client.GetExternalIPAddress(), out address);
+                    } catch(UpnpException e) {
+                        log("UPnP: " + device.Name + " " + service.ServiceType + ": " + e.Message);
+                        continue;
+                    }
+                    // Prefer a connection that is online (a router may list an unused PPP connection next to the real one)
+                    if(igd == null || (NatRules.Classify(external) == AddressClass.None && NatRules.Classify(address) != AddressClass.None)) { igd = client; external = address; }
+                }
+                if(igd != null && NatRules.Classify(external) != AddressClass.None) break;
+            }
+            if(Stopping) return;
+            if(igd == null) {
+                status = status.With(s => { s.State = locations.Count == 0 ? MapState.NoRouter : MapState.Failed; s.Detail = locations.Count == 0 ? "" : "the router didn't answer"; });
+                log("UPnP: no usable router (" + status.State + ")");
+                return;
+            }
+
+            IPAddress local = LocalAddress.Towards(IPAddress.Parse(igd.Service.ControlUrl.Host)) ?? LocalAddress.Lan();
+            AddressClass kind = NatRules.Classify(external);
+            log("UPnP: router " + igd.Device.Name + " (" + igd.Service.ServiceType + "), internet address is " + kind + ", this PC is " + local);
+            status = status.With(s => { s.Router = igd.Device.Name; s.ServiceType = igd.Service.ServiceType; s.ExternalIp = external; s.LocalIp = local; });
+            if(kind == AddressClass.None) { status = status.With(s => s.State = MapState.NoInternet); return; }
+            if(kind == AddressClass.Shared) { status = status.With(s => s.State = MapState.Shared); return; }
+
+            int lease = LeaseSeconds;
+            bool byHand = false;
+            foreach(string protocol in Protocols) {
+                if(Stopping) return;
+                string problem = Map(protocol, local.ToString(), ref lease, ref byHand);
+                if(problem != null) {
+                    log("UPnP: " + protocol + " " + Port + " refused: " + problem);
+                    status = status.With(s => { s.State = MapState.Refused; s.Detail = problem; });
+                    return;
+                }
+            }
+            status = status.With(s => { s.State = MapState.Open; s.LeaseSeconds = lease; s.ForwardedByHand = byHand && added.Count == 0; });
+            log("UPnP: port " + Port + " open (" + (added.Count == 0 ? "forwarded by hand" : "lease " + lease + " s") + ")");
+
+            // Hold the mappings until Stop (Cleanup removes them); renew them on the way unless they are permanent
+            int renew = RenewAfterSeconds(lease);
+            while(added.Count > 0 && !stopRequested.WaitOne(renew > 0 ? renew * 1000 : Timeout.Infinite)) {
+                foreach(string protocol in added.ToList()) {
+                    try {
+                        igd.AddPortMapping(Port, protocol, local.ToString(), Description, lease);
+                    } catch(UpnpException e) {
+                        log("UPnP: renewing " + protocol + " failed: " + e.Message);
+                        status = status.With(s => { s.State = MapState.Failed; s.Detail = "the router stopped renewing the port (" + e.Message + ")"; });
+                    }
+                }
+                Renewals++;
+            }
+        }
+
+        // null when the port is open for this protocol, otherwise why not
+        private string Map(string protocol, string local, ref int lease, ref bool byHand) {
+            PortMappingEntry existing = null;
+            try {
+                existing = igd.GetSpecificPortMappingEntry(Port, protocol);
+            } catch(UpnpException e) {
+                log("UPnP: can't read the router's entry for " + protocol + " " + Port + " (" + e.Message + "), adding anyway");
+            }
+            if(existing != null) {
+                bool thisPc = existing.InternalClient == local;
+                if(!thisPc) return "port " + Port + " is already forwarded to another device (" + existing.InternalClient + ")";
+                if(existing.Description != Description) { byHand = true; return null; } // the host's own port forward: use it, leave it alone
+            }
+
+            try {
+                igd.AddPortMapping(Port, protocol, local, Description, lease);
+            } catch(UpnpException e) when(lease > 0 && e.Code > 0 && e.Code != UpnpException.Conflict && e.Code != UpnpException.NotAuthorized) {
+                // 725 OnlyPermanentLeasesSupported (and older routers that reject any lease): ask once more for a permanent mapping
+                log("UPnP: lease " + lease + " s refused (" + e.Message + "), asking for a permanent mapping");
+                lease = 0;
+                try { igd.AddPortMapping(Port, protocol, local, Description, 0); } catch(UpnpException again) { return Reason(again); }
+            } catch(UpnpException e) {
+                return Reason(e);
+            }
+            added.Add(protocol);
+            return null;
+        }
+
+        private string Reason(UpnpException e) {
+            if(e.Code == UpnpException.Conflict) return "port " + Port + " is already forwarded to another device";
+            if(e.Code == UpnpException.NotAuthorized) return "the router doesn't allow programs to open ports";
+            return e.Message;
+        }
+
+        private void Cleanup() {
+            foreach(string protocol in added) {
+                try {
+                    igd.DeletePortMapping(Port, protocol);
+                    log("UPnP: removed " + protocol + " " + Port + " from the router");
+                } catch(UpnpException e) {
+                    log("UPnP: removing " + protocol + " " + Port + " failed: " + e.Message + (status.LeaseSeconds > 0 ? " (it expires by itself)" : ""));
+                }
+            }
+            added.Clear();
+        }
+    }
+}

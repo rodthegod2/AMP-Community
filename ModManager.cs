@@ -261,6 +261,7 @@ namespace AMP {
             if(serverInstance != null && serverInstance.netamiteServer.IsRunning) {
                 StopHost();
             }
+            Network.Nat.HostPortMapping.WaitForCleanup(3000);
         }
 
         // Always called on the main thread
@@ -320,6 +321,7 @@ namespace AMP {
             serverInstance = new Server();
 
             server.OnStart += (ms) => {
+                Network.Nat.HostPortMapping.Start(port); // in the background; hosting never waits for the router
                 callback(null);
             };
             server.OnStartupError += (error) => {
@@ -404,6 +406,7 @@ namespace AMP {
 
         public static void StopHost() {
             if(serverInstance == null) return;
+            Network.Nat.HostPortMapping.Stop();
             ModSync.QuestMatcher.Stop();
             ModSync.SettingsSyncHost.Stop();
             ModSync.ModTransferHost.StopAll();

@@ -32,6 +32,11 @@
     <Compile Include="..\..\ModSync\AutopilotScript.cs" />
     <Compile Include="..\..\ModSync\ModioRules.cs" />
     <Compile Include="..\..\ModSync\ModMatcher.cs" />
+    <Compile Include="NatTests.cs" />
+    <Compile Include="FakeIgd.cs" />
+    <Compile Include="..\..\Network\Nat\JoinCodes.cs" />
+    <Compile Include="..\..\Network\Nat\Upnp.cs" />
+    <Compile Include="..\..\Network\Nat\PortMapper.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.IO.Compression" />

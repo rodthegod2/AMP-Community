@@ -91,6 +91,9 @@ namespace AMP.Overlay {
                     title = $"[ Server {Defines.FULL_MOD_VERSION} ]";
 
                 GUILayout.Label($"Players: {ModManager.serverInstance.connectedClients} / {host_maxPlayers}");
+                string internetCode = Network.Nat.HostPortMapping.InternetCode, lanCode = Network.Nat.HostPortMapping.LanCode;
+                if(internetCode != null) GUILayout.Label("Internet code: " + internetCode);
+                if(lanCode != null) GUILayout.Label("Same Wi-Fi code: " + lanCode);
                 //GUILayout.Label("Creatures: " + Creature.all.Count + " (Active: " + Creature.allActive.Count + ")");
                 //GUILayout.Label($"Items: {ModManager.serverInstance.spawnedItems}\n"
                 //               +$"Creatures: {ModManager.serverInstance.spawnedCreatures}"
@@ -310,27 +313,27 @@ namespace AMP.Overlay {
             return int.TryParse(text?.Trim(), out port) && port > 0 && port <= short.MaxValue;
         }
 
+        // address: a join code, IP, IP:port, host:port or localhost (Network/Nat/JoinCodes.cs); port is used when address has none
         public static void JoinServer(string address, string port, string password = "", bool save_cache = true) {
-            address = address?.Trim();
-            if(string.IsNullOrEmpty(address) || !TryParsePort(port, out int portNumber)) {
-                string error = $"Invalid address or port \"{address}:{port}\" (port must be 1-{short.MaxValue})";
-                Log.Err(Defines.CLIENT, error);
+            string typed = address?.Trim();
+            if(!Network.Nat.JoinTarget.TryParse(typed, port, out string host, out int portNumber, out string error)) {
+                Log.Err(Defines.CLIENT, $"Can't join \"{typed}\" (port \"{port}\"): {error}");
                 try { ModManager.onConnectionError?.Invoke(error); } catch(Exception e) { Log.Err(e); }
                 return;
             }
 
-            NetamiteClient client = new IPClient(address, portNumber);
+            NetamiteClient client = new IPClient(host, portNumber);
             client.ConnectToken = password;
             client.ClientName = ModManager.instance.UserData.Name;
 
-            
-            ModManager.guiManager.join_ip = address;
-            ModManager.guiManager.join_port = port;
+
+            ModManager.guiManager.join_ip = host;
+            ModManager.guiManager.join_port = portNumber.ToString();
 
             ModManager.JoinServer(client, password);
-            
+
             if (save_cache) {
-                ModManager.safeFile.inputCache.join_address  = address;
+                ModManager.safeFile.inputCache.join_address  = typed; // a code stays a code in the join field
                 ModManager.safeFile.inputCache.join_port     = (ushort) portNumber;
                 ModManager.safeFile.inputCache.join_password = password;
                 ModManager.safeFile.Save();

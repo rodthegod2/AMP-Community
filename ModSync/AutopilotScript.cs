@@ -34,7 +34,7 @@ namespace AMP.ModSync {
         private static readonly Dictionary<string, string> Specs = new Dictionary<string, string> {
             { "waitSpawn",           "" },
             { "host",                "port:int[1-32767] maxPlayers:int[1-64]? password:string?" }, // 32767: Netamite stores ports as short
-            { "join",                "address:string port:int[1-32767] password:string?" },
+            { "join",                "address:string port:int[1-32767]? password:string?" }, // address may be a join code (it brings its port)
             { "waitPlayers",         "count:int[1-64]" }, // host: this many players greeted (the host's own client counts)
             { "expectRemotePlayers", "count:int[1-64]" }, // other players whose avatar (puppet) is spawned in our game
             { "expectRemotePlayerMoved", "minDistance:int[1-100]" }, // a remote avatar moved this many meters from where it was first seen
@@ -62,6 +62,10 @@ namespace AMP.ModSync {
             { "killGame",            "" },
             // This start found a swap that was never undone, undid it in-game (Quest) and is closing by itself: folder (installed by the swap) is gone
             { "expectStartupRestore", "folder:folder" },
+            // Hosting by IP: the router port mapping reached this state (Network/Nat/PortMapper.cs MapState: Off, Open, Shared, NoRouter, ...)
+            { "expectPortMapping",   "state:string" },
+            // Hosting by IP: writes the "lan" or "internet" join code into file (absolute path) for the bot
+            { "writeJoinCode",       "file:string kind:string" },
             { "quit",                "" },
         };
 
