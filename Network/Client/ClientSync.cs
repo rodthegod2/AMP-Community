@@ -543,14 +543,37 @@ namespace AMP.Network.Client {
             if(ps == null) return;
 
             if(ps.creature != null) {
+                Creature puppet = ps.creature;
                 Dispatcher.Enqueue(() => {
-                    Destroy(ps.creature.gameObject);
+                    ReleaseItems(puppet);
+                    // The game's despawn (not pooled: deactivated and released). Destroying the object made the game run Despawn from
+                    // OnDestroy on half-destroyed parts: a NullReferenceException at every leave (soak test)
+                    if(ps.creature == puppet) ps.Despawn();
+                    else if(puppet != null) Destroy(puppet.gameObject);
                 });
             }
             
             ModManager.clientSync.syncData.players.TryRemove(ps.clientId, out _);
             
             if(!stopped) Dispatcher.Enqueue(() => { UI.IngameModUI.currentUI?.RefreshPage(); });
+        }
+
+        // Snapped items are children of the avatar: destroying it destroyed the leaver's holstered weapons (no despawn event, so for
+        // good on every client) and what it held. They are let go first; the server clears their hold state (audit finding 4).
+        private static void ReleaseItems(Creature puppet) {
+            if(puppet == null) return;
+            try {
+                if(puppet.holders != null) {
+                    foreach(Holder holder in puppet.holders.ToList()) {
+                        if(holder == null) continue;
+                        foreach(Item item in holder.items.ToList()) if(item != null) holder.UnSnap(item, true);
+                    }
+                }
+                if(puppet.handLeft != null) puppet.handLeft.UnGrab(false);
+                if(puppet.handRight != null) puppet.handRight.UnGrab(false);
+            } catch(Exception e) {
+                Log.Warn(Defines.CLIENT, "Couldn't release the items of a leaving player: " + e.Message);
+            }
         }
 
         internal void MovePlayer(PlayerNetworkData pnd) {

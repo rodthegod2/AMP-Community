@@ -334,7 +334,20 @@ namespace AMP.Network.Server {
                 ClearItemsAndCreatures();
                 Log.Info(Defines.SERVER, $"Clearing server because the last playing player disconnected.");
             } else {
+                // What the leaver held or wore is free now: clients drop it on their side (ClientSync.LeavePlayer), here and for joiners
+                // the hold state goes too, or the items stayed "held" by nobody: frozen, and snapped to a missing player for later joiners
                 try {
+                    foreach(ItemNetworkData ind in items.Values) {
+                        ItemHoldingState[] states = ind.holdingStates;
+                        if(states == null || !states.Any(s => s != null && s.holderType == Datatypes.ItemHolderType.PLAYER && s.holderNetworkId == client.ClientId)) continue;
+                        ind.holdingStates = new ItemHoldingState[0];
+                        netamiteServer.SendToPlayingExcept(new ItemUnsnapPacket(ind.networkedId), client.ClientId);
+                    }
+                } catch(Exception e) {
+                    Log.Err(Defines.SERVER, $"Couldn't free the items of {client.ClientName}.\n{e}");
+                }
+                try {
+                    lock(ownerLock) // migration runs on the timeout/disconnect thread, alongside packets that change owners
                     try {
                         KeyValuePair<int, int>[] entries = item_owner.Where(entry => entry.Value == client.ClientId).ToArray();
 
