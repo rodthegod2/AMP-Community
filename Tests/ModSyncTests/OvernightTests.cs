@@ -34,16 +34,20 @@ internal static partial class Program {
         T("item cap: limit 0 means off", pick(new[] { 1, 2 }, new int[0], 0) == "");
     }
 
-    // Quest research: PC is on 1.3.1.x, Nomad's build is unknown; AMP never compared game versions, a joiner is now told (never blocked)
+    // Quest research: PC is on 1.3.1.x, Nomad's build is unknown; AMP never compared game versions, a joiner is now told (never blocked).
+    // Review M1: only major.minor.patch is compared, a build-number difference across platforms says nothing, unknown formats say nothing.
     private static void GameVersionTests() {
-        T("game version: same build -> nothing", HostModSet.GameVersionNote("1.3.1.260730005", "1.3.1.260730005") == null);
-        T("game version: unknown on either side -> nothing", HostModSet.GameVersionNote("", "1.3.1.2") == null && HostModSet.GameVersionNote("1.3.1.2", null) == null);
-        string hotfix = HostModSet.GameVersionNote("1.3.1.260730005", "1.3.1.2");
-        T("game version: another hotfix of the same release -> mild note", hotfix != null && hotfix.Contains("Usually fine"));
-        string other = HostModSet.GameVersionNote("1.3.1.2", "1.3.0.5");
-        T("game version: another release -> says both should be on the same version", other != null && other.Contains("same game version") && other.Contains("1.3.1.2") && other.Contains("1.3.0.5"));
+        Func<string, string, bool, string> note = HostModSet.GameVersionNote;
+        T("game version: same build -> nothing", note("1.3.1.260730005", "1.3.1.260730005", true) == null);
+        T("game version: unknown on either side -> nothing", note("", "1.3.1.2", true) == null && note("1.3.1.2", null, false) == null);
+        string hotfix = note("1.3.1.260730005", "1.3.1.2", true);
+        T("game version: another hotfix, same platform -> mild note", hotfix != null && hotfix.Contains("Usually fine"));
+        T("game version: another build number across platforms -> nothing", note("1.3.1.260730005", "1.3.1.7", false) == null);
+        string other = note("1.3.1.2", "1.3.0.5", false);
+        T("game version: another release -> says both should be on the same version (release numbers only)", other != null && other.Contains("same game version") && other.Contains("1.3.1") && other.Contains("1.3.0") && !other.Contains("1.3.0.5"));
+        T("game version: a format we can't read -> nothing", note("1.3 Nomad", "1.3.1.2", false) == null && note("1.3", "1.3.1", true) == null);
         HostModSet old = Newtonsoft.Json.JsonConvert.DeserializeObject<HostModSet>("{\"protocol\":1,\"platform\":\"windows\",\"mods\":[]}");
-        T("game version: a 1.2.0 host's list (no gameVersion) reads as unknown", old.gameVersion == "" && HostModSet.GameVersionNote(old.gameVersion, "1.3.1.2") == null);
+        T("game version: a 1.2.0 host's list (no gameVersion) reads as unknown", old.gameVersion == "" && note(old.gameVersion, "1.3.1.2", true) == null);
     }
 
     // A joiner's NaN/infinite position was relayed to every player (fuzz test: thousands of Unity errors per second on the host)

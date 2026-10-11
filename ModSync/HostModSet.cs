@@ -34,14 +34,27 @@ namespace AMP.ModSync {
         // Appended in 1.2.1: the host's Blade & Sorcery version (GameSettings.GetVersionString), "" from older hosts. Never blocks joining.
         public string         gameVersion  = "";
 
-        // What a joiner is told when its game version differs from the host's; null when they match or one is unknown.
-        // Only major.minor.revision counts as a real difference; another build number (a hotfix) is mentioned more mildly.
-        public static string GameVersionNote(string hostVersion, string myVersion) {
+        // What a joiner is told when its game version differs from the host's; null when they match or one is unknown/unreadable.
+        // Only major.minor.patch is compared (PC and Nomad build numbers have different formats); on the same platform another build
+        // number (a hotfix) gets a mild note. Never blocks joining.
+        public static string GameVersionNote(string hostVersion, string myVersion, bool samePlatform) {
             string host = (hostVersion ?? "").Trim(), mine = (myVersion ?? "").Trim();
             if(host.Length == 0 || mine.Length == 0 || host == mine) return null;
-            Func<string, string> release = v => string.Join(".", v.Split('.').Take(3).ToArray());
-            if(release(host) == release(mine)) return "The host's game build is " + host + ", yours is " + mine + " (same version, another hotfix). Usually fine.";
-            return "The host runs Blade & Sorcery " + host + ", you run " + mine + ".\nBoth should be on the same game version: expect missing items or desyncs.";
+            string hostRelease = Release(host), myRelease = Release(mine);
+            if(hostRelease == null || myRelease == null) return null; // a format we don't know: say nothing rather than something wrong
+            if(hostRelease == myRelease) {
+                return samePlatform ? "The host's game build is " + host + ", yours is " + mine + " (same version, another hotfix). Usually fine." : null;
+            }
+            return "The host runs Blade & Sorcery " + hostRelease + ", you run " + myRelease + ".\nBoth should be on the same game version: expect missing items or desyncs.";
+        }
+
+        // "1.3.1.260730005" -> "1.3.1"; null unless it starts with three numbers
+        private static string Release(string version) {
+            string[] parts = version.Split('.');
+            if(parts.Length < 3) return null;
+            int n;
+            for(int i = 0; i < 3; i++) if(!int.TryParse(parts[i], out n)) return null;
+            return parts[0] + "." + parts[1] + "." + parts[2];
         }
 
         // Whether a joiner on this platform plans with this list or waits for the next one

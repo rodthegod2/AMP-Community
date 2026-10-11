@@ -66,7 +66,7 @@ namespace AMP.ModSync {
                 return;
             }
             if(set == null) return;
-            string versionNote = HostModSet.GameVersionNote(set.gameVersion, ModSyncPaths.GameVersion);
+            string versionNote = HostModSet.GameVersionNote(set.gameVersion, ModSyncPaths.GameVersion, string.Equals(set.platform, ModSyncPaths.Platform, StringComparison.OrdinalIgnoreCase));
             if(versionNote != null) {
                 Log.Warn(Defines.CLIENT, "Mod sync: " + versionNote.Replace("\n", " "));
                 Dispatcher.Enqueue(() => {
