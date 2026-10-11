@@ -32,7 +32,7 @@ e9f3cbf: Discord off on Android (it threw every FixedUpdate), host game version 
 docs/TEST-WITH-FRIEND.md (morning checklist). Note: PC Player.log is in `StreamingAssets\Logs`, and every test run overwrites it.
 
 ## 1.2.1 (staged, NOT published)
-COMMUNITY_VERSION 1.2.1; `tools/make-release.sh 1.2.1` staged dist/AMP-Community-1.2.1.zip (SHA256 b930c0d3...). Pushed to fork `community`. Publish: `tools/make-release.sh 1.2.1 --publish`.
+COMMUNITY_VERSION 1.2.1; `tools/make-release.sh 1.2.1` staged dist/AMP-Community-1.2.1.zip (SHA256 d3e0ba08..., built from the tested code). Pushed to fork `community`. Publish: `tools/make-release.sh 1.2.1 --publish`.
 
 ## Safety
 Every run: real Mods moved aside and restored (manifest verified), real saves unchanged (only steam_autocloud.vdf time exempt), real mod.io data unchanged, only own PIDs stopped, commit charge 18-37 GB. Final state: no unrestored aside folder, no AMP_ModCache in the install, doorstop enabled=false, no game/bot/helper process, real router mapping deleted and verified gone (05:54; tests never touch it). Real-mod copies removed from run folders (logs kept). Side effect: test runs rewrite the game's own StreamingAssets\Logs\Player.log.
