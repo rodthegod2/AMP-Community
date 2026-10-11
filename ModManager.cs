@@ -390,6 +390,7 @@ namespace AMP {
             LevelFunc.SetBookAvailability(true, true);
 
             ModSync.SettingsSyncClient.Restore();
+            ModSync.ModSwapClient.ConnectionLost();
             ModSync.ModTransferClient.Cancel();
 
             clientInstance?.Disconnect();

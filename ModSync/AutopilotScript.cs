@@ -44,6 +44,9 @@ namespace AMP.ModSync {
             { "expectAmpVersion",    "version:string" },  // the running AMP's community version
             { "expectModSync",       "blocks:bool" },
             { "downloadAndRestart",  "mode:mode" },
+            { "expectDownloadFails", "mode:mode? contains:string?" }, // the setup starts and ends in an error without closing the game
+            { "expectLeftOverSwap",  "" },                // PC: this start found a Temporary swap a killed session left behind
+            { "restoreMods",         "" },                // presses "Restore my mods" (PC: the helper restores and relaunches the game)
             { "expectRejoined",      "" },
             { "expectModFolder",     "folder:folder present:bool" },
             { "setOption",           "mod:string option:string title:string" },

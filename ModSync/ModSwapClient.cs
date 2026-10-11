@@ -84,6 +84,7 @@ namespace AMP.ModSync {
         internal static void Reset() {
             attempt++;
             busy = false;
+            LastError = ""; // an error of the previous connection's setup doesn't belong on the next host's page
         }
 
         #region Download & restart
@@ -364,6 +365,16 @@ namespace AMP.ModSync {
             if(ui != null) ui.ShowModSyncProgress(text);
         }
 
+        internal const string ConnectionLostText = "The connection to the host was lost during the download.\nJoin again to continue: mods that finished downloading are kept.";
+
+        // Main thread, when the connection ends (ModManager.StopClientImmediatly). A download that was still running stops silently
+        // (ModTransferClient.Cancel), so without this the setup would wait forever; once the helper runs, the game is closing anyway.
+        internal static void ConnectionLost() {
+            if(!busy || closingForRestart || helperLaunched) return;
+            attempt++; // a mod.io download of this setup stops at its next step
+            Fail(ConnectionLostText);
+        }
+
         private static void Fail(string error) {
             busy = false;
             LastError = error ?? "Download failed.";
@@ -429,9 +440,21 @@ namespace AMP.ModSync {
                             : "Your mods couldn't be restored automatically:\n" + journal.lastError + "\nBook > Mods > AMP > Restore my mods.");
                     }
                     break;
-                // None: PC Temporary swaps are restored on quit (OnQuit); a crash leaves Applied behind, "Restore my mods" handles it
+                case StartupAction.None:
+                    // PC: a Temporary swap is undone when the game quits normally. After a crash this start runs with the host's mods
+                    // and the multiplayer save without a word; say so (quitting normally or "Restore my mods" brings the player's mods back).
+                    if(!InGame && journal.state == SwapState.Applied && journal.mode == SwapMode.Temporary) {
+                        LeftOverAtStartup = true;
+                        Log.Warn(Defines.CLIENT, "Mod swap: the last session ended without quitting normally, the host's mods are still installed.");
+                        Notice(LeftOverText);
+                    }
+                    break;
             }
         }
+
+        internal static bool LeftOverAtStartup { get; private set; } // PC: this start found a Temporary swap the last session didn't undo (tests)
+        internal const string LeftOverText = "The last multiplayer session didn't close normally: the host's mods are still installed.\n"
+                                           + "Book > Mods > AMP > Restore my mods (or quit the game normally) to get your own mods back.";
 
         private const float StartupCloseWait = 120f; // how long the player gets to load into a level and read why the game closes
 
@@ -600,6 +623,7 @@ namespace AMP.ModSync {
                 int start = lines.FindLastIndex(l => l.Contains("helper start"));
                 Func<string, string> text = l => { int space = l.IndexOf(' '); return space >= 0 ? l.Substring(space + 1) : l; };
                 List<string> run = lines.Skip(Math.Max(start, 0)).Select(text).ToList();
+                Log.Info(Defines.CLIENT, "Mod swap helper: " + string.Join(" | ", run.ToArray())); // the file is gone now: keep it in Player.log
                 string problem = run.LastOrDefault(t => t.StartsWith("failed") || t.StartsWith("error"));
                 string note = run.LastOrDefault(t => t.StartsWith("note:"));
                 if(problem != null) Notice("The mod swap didn't work:\n" + problem);

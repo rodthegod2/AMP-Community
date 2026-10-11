@@ -38,6 +38,26 @@ namespace AMP.ModSync {
             if(isolated == null) { Log.Warn(Defines.AMP, "Autopilot ignored: this is not an isolated test run."); return; }
             Active = true;
             host.StartCoroutine(Run(isolated.ToString(), scriptPath));
+            host.StartCoroutine(FrameWatch());
+        }
+
+        // Every 10 s: "AMPTEST PERF ..." with the longest frame (a main-thread freeze shows up here) and the managed heap (leaks)
+        private static IEnumerator FrameWatch() {
+            float windowStart = Time.realtimeSinceStartup, last = windowStart, worst = 0f;
+            int frames = 0;
+            while(true) {
+                yield return null;
+                float now = Time.realtimeSinceStartup;
+                worst = Math.Max(worst, now - last);
+                last = now;
+                frames++;
+                if(now - windowStart < 10f) continue;
+                Debug.Log(Prefix + "PERF frames " + frames + " in " + (now - windowStart).ToString("0.0") + " s, longest " + (worst * 1000f).ToString("0")
+                          + " ms, managed heap " + (GC.GetTotalMemory(false) >> 20) + " MB, connected " + Connected() + ", hosting " + (ModManager.serverInstance != null));
+                windowStart = now;
+                worst = 0f;
+                frames = 0;
+            }
         }
 
         // The harness started the game through Steam with these arguments; a relaunch after a mod swap has to do the same
@@ -144,6 +164,9 @@ namespace AMP.ModSync {
                 case "expectAmpVersion":    return ExpectAmpVersion(step);
                 case "expectModSync":       return ExpectModSync(step);
                 case "downloadAndRestart":  return DownloadAndRestart(n, step, state, statePath);
+                case "expectDownloadFails": return ExpectDownloadFails(step);
+                case "expectLeftOverSwap":  return ExpectLeftOverSwap();
+                case "restoreMods":         return RestoreMods(n, state, statePath);
                 case "expectRejoined":      return ExpectRejoined(state);
                 case "expectModFolder":     return ExpectModFolder(step);
                 case "setOption":           return SetOption(step);
@@ -372,6 +395,51 @@ namespace AMP.ModSync {
                 }
                 yield return Poll;
             }
+        }
+
+        // The setup is started and must end in an error (the host drops the connection mid-transfer, ...) without closing the game;
+        // "contains": text the error must contain
+        private static IEnumerator ExpectDownloadFails(AutopilotStep step) {
+            SwapMode mode = (SwapMode) Enum.Parse(typeof(SwapMode), step.Str("mode", "Temporary"));
+            while(ModSyncClient.Plan == null) {
+                if(ModManager.clientInstance == null) { failure = "not connected, nothing to download"; yield break; }
+                yield return Poll;
+            }
+            if(!ModSwapClient.CanDownload(ModSyncClient.Plan)) { failure = "the plan can't be downloaded"; yield break; }
+            while(!ModSwapClient.Busy && ModSwapClient.LastError.Length == 0) {
+                ModSwapClient.DownloadAndRestart(mode); // ignored during the retry cool-down: tried again
+                yield return Poll;
+            }
+            while(ModSwapClient.Busy) {
+                if(ModSwapClient.ClosingForRestart) { failure = "the setup went ahead and the game is closing for the restart"; yield break; }
+                yield return Poll;
+            }
+            string error = ModSwapClient.LastError.Replace("\r", " ").Replace("\n", " ");
+            Debug.Log(Prefix + "INFO the setup failed as expected: " + error);
+            if(error.Length == 0) failure = "the setup ended without an error";
+            else if(step.Str("contains", null) != null && !error.Contains(step.Str("contains"))) failure = "the error doesn't say \"" + step.Str("contains") + "\": " + error;
+        }
+
+        // PC: this start found a Temporary swap that the last session (killed) didn't undo, said so, and offers "Restore my mods"
+        private static IEnumerator ExpectLeftOverSwap() {
+            if(!ModSwapClient.LeftOverAtStartup) failure = "this start didn't report a left-over swap";
+            else if(!ModSwapClient.CanRestore) failure = "\"Restore my mods\" isn't offered";
+            yield break;
+        }
+
+        // Presses "Restore my mods": the helper restores after the game closed and starts it again; the next start continues after this step
+        private static IEnumerator RestoreMods(int n, AutopilotState state, string statePath) {
+            if(!ModSwapClient.CanRestore) { failure = "there is nothing to restore"; yield break; }
+            string unsafeRelaunch = AutopilotScript.IsolationProblem(RelaunchArguments());
+            if(unsafeRelaunch != null) { failure = "refusing to restart, the relaunch wouldn't be isolated: " + unsafeRelaunch; yield break; }
+            state.values["restartedFrom"] = n.ToString();
+            state.step = n + 1;
+            state.Save(statePath);
+            restartStep = n;
+            ModSwapClient.RestoreNow();
+            while(ModSwapClient.Busy) yield return Poll; // the game closes while busy
+            restartStep = -1;
+            failure = "the restore didn't start";
         }
 
         // Like Android ending the app: no quit event, so nothing gets undone on the way out. The runner starts the game again.
