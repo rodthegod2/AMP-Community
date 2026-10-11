@@ -133,7 +133,9 @@ $Scenarios = [ordered]@{
         # Map changes off: a player who walks into another level is sent back to the host's level instead of kicked (audit QOL 1)
         GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'setOption'; mod = 'MultiplayerMod'; option = 'Players Change Map'; title = 'Disabled' },
-                     @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 15 }, @{ step = 'quit' })
+                     @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 15 },
+                     # the host itself still changes the map (it was told "Only the host changes the map" before)
+                     @{ step = 'loadLevel'; level = 'Arena'; mode = 'Sandbox'; timeout = 300 }, @{ step = 'wait'; seconds = 10 }, @{ step = 'expectLevel'; level = 'Arena' }, @{ step = 'quit' })
         Expect   = @{ greeted = $true; wanderTo = 'Arena'; lingerSec = 2 }
     }
     'join-npc-health' = @{

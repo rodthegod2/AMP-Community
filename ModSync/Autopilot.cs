@@ -168,6 +168,7 @@ namespace AMP.ModSync {
                 case "expectLeftOverSwap":  return ExpectLeftOverSwap();
                 case "expectImbue":         return ExpectImbue(step);
                 case "loadLevel":           return LoadLevel(step);
+                case "expectLevel":         return ExpectLevel(step);
                 case "expectCreatureHealth": return ExpectCreatureHealth(step);
                 case "expectItemHeld":      return ExpectItemHeld(step);
                 case "expectItemFree":      return ExpectItemFree(step);
@@ -483,6 +484,12 @@ namespace AMP.ModSync {
                 }
                 yield return Poll;
             }
+        }
+
+        private static IEnumerator ExpectLevel(AutopilotStep step) {
+            string now = Level.current != null && Level.current.data != null ? Level.current.data.id : "(none)";
+            if(!string.Equals(now, step.Str("level"), StringComparison.OrdinalIgnoreCase)) failure = "the level is " + now + ", expected " + step.Str("level");
+            yield break;
         }
 
         // Loads another level like the player would (the host's book); done when the player has spawned in it

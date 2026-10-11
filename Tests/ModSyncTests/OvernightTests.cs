@@ -10,6 +10,17 @@ internal static partial class Program {
         PacketNumberTests();
         GameVersionTests();
         ItemCapTests();
+        LevelChangeRuleTests();
+    }
+
+    // Review I4: the pull-back must not drag a player out of the main menu, and must not hit the host itself
+    private static void LevelChangeRuleTests() {
+        Func<string, bool, bool, AMP.Network.Data.LevelChangeDecision> d = AMP.Network.Data.LevelChangeRules.Decide;
+        T("level change: quitting to MainMenu with map changes off is not pulled back", d("MainMenu", false, false) == AMP.Network.Data.LevelChangeDecision.KickMainMenu);
+        T("level change: MainMenu in any case", d("mainmenu", true, false) == AMP.Network.Data.LevelChangeDecision.KickMainMenu && d("MAINMENU", false, true) == AMP.Network.Data.LevelChangeDecision.KickMainMenu);
+        T("level change: the host changes the map even when map changes are off", d("Arena", false, true) == AMP.Network.Data.LevelChangeDecision.Proceed);
+        T("level change: a joiner with map changes off is pulled back", d("Arena", false, false) == AMP.Network.Data.LevelChangeDecision.PullBack);
+        T("level change: map changes on -> anyone", d("Arena", true, false) == AMP.Network.Data.LevelChangeDecision.Proceed);
     }
 
     // Audit 10: the item cap removed held items (the starting weapon on the hip)

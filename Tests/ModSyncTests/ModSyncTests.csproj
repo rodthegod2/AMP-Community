@@ -36,6 +36,7 @@
     <Compile Include="OvernightTests.cs" />
     <Compile Include="..\..\Network\Packets\PacketNumbers.cs" />
     <Compile Include="..\..\Network\Data\ItemCapPolicy.cs" />
+    <Compile Include="..\..\Network\Data\LevelChangeRules.cs" />
     <Compile Include="FakeIgd.cs" />
     <Compile Include="..\..\Network\Nat\JoinCodes.cs" />
     <Compile Include="..\..\Network\Nat\Upnp.cs" />

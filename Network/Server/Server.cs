@@ -188,6 +188,13 @@ namespace AMP.Network.Server {
             BringToHost(client);
         }
 
+        // The player hosting from inside this game (Netamite ids start at 1, so an id test can't tell the host apart). The address check
+        // keeps a matching id on some other server this game joined from counting (same rule as the lobby admin in GreetPlayer).
+        internal bool IsOwnClient(ClientData client) {
+            return client != null && ModManager.clientInstance?.netclient != null && ModManager.clientInstance.netclient.ClientId == client.ClientId
+                && ModManager.guiManager?.join_ip == "127.0.0.1";
+        }
+
         // hostingSettings.spawnJoinersNearHost: a moment after the greeting (the joiner's player is spawned by then), next to the host's player
         private void BringToHost(ClientData joiner) {
             if(!ModManager.safeFile.hostingSettings.spawnJoinersNearHost) return;

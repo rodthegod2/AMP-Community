@@ -49,7 +49,8 @@ namespace AMP.ModSync {
             { "expectCreatureHealth", "type:string health:int[0-100000]" }, // another player's NPC of this type is here with this health
             { "expectItemHeld",      "dataId:string" },   // another player's item is held/snapped here
             { "expectItemFree",      "dataId:string holdSeconds:int[0-600]?" }, // host: after its holder left, the item still exists and is free
-            { "loadLevel",           "level:string mode:string?" },  // loads another level (the player starts a level change)
+            { "loadLevel",           "level:string mode:string?" },
+            { "expectLevel",         "level:string" },     // the level loaded right now  // loads another level (the player starts a level change)
             { "expectSyncConsistent", "" },               // host: every synced item/creature here exists on the server
             { "expectImbue",         "dataId:string spell:string minEnergy:int[0-100000] maxEnergy:int[0-100000]? holdSeconds:int[0-600]?" }, // another player's item is imbued here
             { "restoreMods",         "" },                // presses "Restore my mods" (PC: the helper restores and relaunches the game)
