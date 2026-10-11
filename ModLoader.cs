@@ -9,6 +9,9 @@ using UnityEngine;
 using UnityEngine.UI;
 
 namespace AMP {
+    // Without this attribute ModSupportedPlatformsAttribute.IsSupported says "Windows only" (false on Android). Nothing in the PC game
+    // calls it; if Nomad does, AMP would never load on Quest. Unverified on a headset.
+    [ModSupportedPlatforms(SupportedPlatforms.Windows | SupportedPlatforms.Android)]
     public class ModLoader : ThunderScript {
         
 

@@ -6,6 +6,19 @@ internal static partial class Program {
     private static void OvernightTests() {
         SetupTimeoutTests();
         PacketNumberTests();
+        GameVersionTests();
+    }
+
+    // Quest research: PC is on 1.3.1.x, Nomad's build is unknown; AMP never compared game versions, a joiner is now told (never blocked)
+    private static void GameVersionTests() {
+        T("game version: same build -> nothing", HostModSet.GameVersionNote("1.3.1.260730005", "1.3.1.260730005") == null);
+        T("game version: unknown on either side -> nothing", HostModSet.GameVersionNote("", "1.3.1.2") == null && HostModSet.GameVersionNote("1.3.1.2", null) == null);
+        string hotfix = HostModSet.GameVersionNote("1.3.1.260730005", "1.3.1.2");
+        T("game version: another hotfix of the same release -> mild note", hotfix != null && hotfix.Contains("Usually fine"));
+        string other = HostModSet.GameVersionNote("1.3.1.2", "1.3.0.5");
+        T("game version: another release -> says both should be on the same version", other != null && other.Contains("same game version") && other.Contains("1.3.1.2") && other.Contains("1.3.0.5"));
+        HostModSet old = Newtonsoft.Json.JsonConvert.DeserializeObject<HostModSet>("{\"protocol\":1,\"platform\":\"windows\",\"mods\":[]}");
+        T("game version: a 1.2.0 host's list (no gameVersion) reads as unknown", old.gameVersion == "" && HostModSet.GameVersionNote(old.gameVersion, "1.3.1.2") == null);
     }
 
     private struct Vec { public float x, y, z; public Vec(float x, float y, float z) { this.x = x; this.y = y; this.z = z; } }

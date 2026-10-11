@@ -18,20 +18,35 @@ namespace AMP.Discord {
 
         public bool isInitialized = false;
 
+        // Never throws: callers run every FixedUpdate. Without Discord (Quest, or the SDK can't be set up) it stays an inactive instance.
         public static DiscordIntegration Instance { 
             get { 
-                if(currentInstance == null) currentInstance = new DiscordIntegration();
+                if(currentInstance == null) {
+                    try {
+                        currentInstance = new DiscordIntegration();
+                    } catch(Exception e) {
+                        Log.Warn("Discord integration is off: " + e.Message);
+                        currentInstance = new DiscordIntegration(false);
+                    }
+                }
                 return currentInstance;
             }
         }
+
+        private DiscordIntegration(bool unused) { } // inactive: discord stays null, every method returns early
 
         private string discordSdkFile = Path.Combine(Application.dataPath, "..", "discord_game_sdk.dll");
 
         private static global::Discord.Discord discord;
         internal DiscordIntegration() {
-            CheckForDiscordSDK();
+            // Quest: there is no Discord SDK for Android, and the SDK file would be written into the apk's path
+            if(Application.platform == RuntimePlatform.Android) {
+                Log.Info("Discord integration isn't available on this platform.");
+                return;
+            }
 
             try {
+                CheckForDiscordSDK();
                 if(discord == null) discord = new global::Discord.Discord(Config.DISCORD_APP_ID, (UInt64) CreateFlags.NoRequireDiscord);
                 isInitialized = true;
             } catch(Exception) {

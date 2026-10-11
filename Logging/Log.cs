@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Drawing;
+
 
 namespace AMP.Logging {
     public static class Log {
@@ -165,8 +165,9 @@ namespace AMP.Logging {
 
                     for(int i = 0; i < chars.Length; ) {
                         if(message.Substring(i).StartsWith("<color=")) {
-                            Color c = ColorTranslator.FromHtml(message.Substring(i + 7, 7));
-                            colors.Add(ClosestConsoleColor(c.R, c.G, c.B));
+                            int rgb;
+                            if(!int.TryParse(message.Substring(i + 8, 6), System.Globalization.NumberStyles.HexNumber, null, out rgb)) rgb = 0xFFFFFF;
+                            colors.Add(ClosestConsoleColor((byte) (rgb >> 16), (byte) (rgb >> 8), (byte) rgb));
                             Console.ForegroundColor = colors[colors.Count - 1];
                             i += 15;
                         } else if(message.Substring(i).StartsWith("</color>")) {
@@ -189,14 +190,20 @@ namespace AMP.Logging {
             }
         }
 
+        // The named colours System.Drawing gave each ConsoleColor (DarkYellow as Orange), without referencing System.Drawing
+        // (not part of the Quest build)
+        private static readonly int[] ConsoleRgb = {
+            0x000000, 0x00008B, 0x006400, 0x008B8B, 0x8B0000, 0x8B008B, 0xFFA500, 0x808080,
+            0xA9A9A9, 0x0000FF, 0x008000, 0x00FFFF, 0xFF0000, 0xFF00FF, 0xFFFF00, 0xFFFFFF,
+        };
+
         private static ConsoleColor ClosestConsoleColor(byte r, byte g, byte b) {
             ConsoleColor ret = 0;
             double rr = r, gg = g, bb = b, delta = double.MaxValue;
 
             foreach(ConsoleColor cc in Enum.GetValues(typeof(ConsoleColor))) {
-                var n = Enum.GetName(typeof(ConsoleColor), cc);
-                var c = System.Drawing.Color.FromName(n == "DarkYellow" ? "Orange" : n); // bug fix
-                var t = Math.Pow(c.R - rr, 2.0) + Math.Pow(c.G - gg, 2.0) + Math.Pow(c.B - bb, 2.0);
+                int rgb = ConsoleRgb[(int) cc];
+                var t = Math.Pow((rgb >> 16) - rr, 2.0) + Math.Pow(((rgb >> 8) & 0xFF) - gg, 2.0) + Math.Pow((rgb & 0xFF) - bb, 2.0);
                 if(t == 0.0)
                     return cc;
                 if(t < delta) {

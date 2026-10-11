@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace AMP.ModSync {
     // "off": old behaviour (no mod list); "warn": show differences, joiners may still join; "enforce": joiners must match
@@ -30,6 +31,18 @@ namespace AMP.ModSync {
         // Appended in 1.1.0: the host is still looking up Quest versions (questModioId) on mod.io. A joiner on another platform waits for
         // the list the host sends again once that is done; same-platform joiners don't need them and go ahead.
         public bool           questPending;
+        // Appended in 1.2.1: the host's Blade & Sorcery version (GameSettings.GetVersionString), "" from older hosts. Never blocks joining.
+        public string         gameVersion  = "";
+
+        // What a joiner is told when its game version differs from the host's; null when they match or one is unknown.
+        // Only major.minor.revision counts as a real difference; another build number (a hotfix) is mentioned more mildly.
+        public static string GameVersionNote(string hostVersion, string myVersion) {
+            string host = (hostVersion ?? "").Trim(), mine = (myVersion ?? "").Trim();
+            if(host.Length == 0 || mine.Length == 0 || host == mine) return null;
+            Func<string, string> release = v => string.Join(".", v.Split('.').Take(3).ToArray());
+            if(release(host) == release(mine)) return "The host's game build is " + host + ", yours is " + mine + " (same version, another hotfix). Usually fine.";
+            return "The host runs Blade & Sorcery " + host + ", you run " + mine + ".\nBoth should be on the same game version: expect missing items or desyncs.";
+        }
 
         // Whether a joiner on this platform plans with this list or waits for the next one
         public bool WaitForQuestIds(string joinerPlatform) {

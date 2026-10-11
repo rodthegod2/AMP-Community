@@ -70,6 +70,7 @@ namespace AMP.ModSync {
                 platform     = ModSyncPaths.Platform,
                 mode         = mode,
                 personalMods = (ModManager.safeFile.hostingSettings.personalMods ?? new string[0]).Where(name => !string.IsNullOrWhiteSpace(name)).ToArray(),
+                gameVersion  = ModSyncPaths.GameVersion,
             };
             // Quest matching: only a PC host maps its (Nexus) mods to mod.io pages with a Quest file
             bool matchQuest = ModSyncPaths.Platform == "windows";

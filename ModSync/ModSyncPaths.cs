@@ -10,6 +10,7 @@ namespace AMP.ModSync {
         internal static string CacheFolder { get; private set; }
         internal static string Platform    { get; private set; }
         internal static bool   Simulated   { get; private set; } // an isolated PC test runs as another platform (-amp-simulate-platform)
+        internal static string GameVersion { get; private set; } = ""; // Blade & Sorcery's version, like "1.3.1.260730005"
 
         // False when Init couldn't find the Mods folder: mod sync then stays out of the way
         internal static bool Available { get { return !string.IsNullOrEmpty(ModsFolder); } }
@@ -19,6 +20,7 @@ namespace AMP.ModSync {
             CacheFolder = null;
             Platform    = Application.platform == RuntimePlatform.Android ? "android" : "windows";
             Simulated   = false;
+            try { GameVersion = GameSettings.GetVersionString() ?? ""; } catch(Exception e) { Debug.Log("[AMP] Mod sync: the game version is unknown. " + e.Message); }
             string[] args = Environment.GetCommandLineArgs();
             if(AutopilotScript.FindArg(args, AutopilotScript.SimulatePlatformFlag) != null) {
                 string simulated = AutopilotScript.SimulatedPlatform(args, AppDomain.CurrentDomain.GetData("AMP_TEST_ISOLATED") != null);

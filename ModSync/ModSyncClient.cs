@@ -66,6 +66,13 @@ namespace AMP.ModSync {
                 return;
             }
             if(set == null) return;
+            string versionNote = HostModSet.GameVersionNote(set.gameVersion, ModSyncPaths.GameVersion);
+            if(versionNote != null) {
+                Log.Warn(Defines.CLIENT, "Mod sync: " + versionNote.Replace("\n", " "));
+                Dispatcher.Enqueue(() => {
+                    if(ModManager.clientInstance == client) TextDisplay.ShowTextDisplay(new DisplayTextPacket("gameversion", versionNote, Color.yellow, Vector3.forward * 2 + Vector3.up * 0.4f, true, true, 20));
+                });
+            }
             if(Volatile.Read(ref planning) == 1) {
                 Log.Info(Defines.CLIENT, "Mod sync: the host's updated mod list came after planning started, keeping the current plan.");
                 return;
