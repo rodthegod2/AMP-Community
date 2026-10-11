@@ -183,7 +183,12 @@ Other host settings (config.json -> "hostingSettings"):
 Quest support is new and has NOT been tested on a headset yet. Expect
 problems, and please report what happens. Use a spare character.
 
-Install on Quest (the same zip as on PC):
+Install on Quest - easiest, no PC needed (mod.io):
+ In the game: Book > Mods, search "Rod's Multiplayer Mod", Subscribe,
+ restart the game. Page: https://mod.io/g/blade-and-sorcery/m/rods-multiplayer-mod
+ mod.io keeps it up to date. Don't also install it by hand (only one AMP folder).
+
+Or install by hand (the same zip as on PC):
  1. Start Blade & Sorcery: Nomad once and quit it (it creates its folders).
  2. Connect the Quest to the PC with a USB DATA cable (a charge-only cable
     doesn't show the files) and accept "Allow access to data" in the
@@ -194,9 +199,9 @@ Install on Quest (the same zip as on PC):
     The folder must sit directly in Mods, not inside another folder.
  Without a PC: a file manager app on the headset (e.g. Mobile VR Station,
  not tested by us) can copy the unzipped folder there. The game's own Mods
- button only shows mod.io mods, and AMP Community isn't on mod.io yet (the
- AMP on mod.io, also its "[Crossplay]" Nomad build, is the original and
- doesn't work with this build). Never install both: only one AMP folder.
+ button only shows mod.io mods (this build is listed there as "Rod's
+ Multiplayer Mod"; the original AMP on mod.io, also its "[Crossplay]" Nomad
+ build, doesn't work with this build). Never install both: only one AMP folder.
  Both players need the same Blade & Sorcery version: PC is on 1.3.1.x, and
  it's unknown whether Nomad has 1.3.1 yet. AMP doesn't block a different
  version, it shows a warning when you join.
