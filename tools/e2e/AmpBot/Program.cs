@@ -17,6 +17,7 @@ namespace AmpBot {
     //                                        a bad line (Proxy.cs) on 127.0.0.1:<p>: host mode puts it in front of the bot's port (the game
     //                                        joins <p>), join mode in front of the game's port (the bot connects through it)
     //   ... --fuzz                           join: first a hostile joiner (Fuzz.cs), then the normal join with --expect
+    //   ... --owner-race                     join as two players that grab the same item at once, many times (OwnerRace.cs)
     //   ... --soak <minutes> [--rejoin-every <s>]   join: stay for that long, playing, and disconnect + rejoin every <s> (default 600);
     //                                        every round must meet the gameplay expectations again
     //   AmpBot --selftest [<AMP repo folder>]   packet layouts vs AMP's sources + a host/joiner loopback
@@ -91,6 +92,8 @@ namespace AmpBot {
                 hoster.Stop();
             } else if(a.Contains("--fuzz") && !new Fuzzer(join, port, mods, cache, x).Run(list)) {
                 ok = false;
+            } else if(a.Contains("--owner-race")) {
+                ok = new OwnerRace(join, port).Run(list);
             } else if(soakMin > 0) {
                 ok = Soak(join, port, mods, cache, x, list, soakMin, rejoinSec);
             } else {

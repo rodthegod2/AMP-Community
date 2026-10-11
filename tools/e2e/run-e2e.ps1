@@ -342,6 +342,14 @@ $Scenarios = [ordered]@{
                      @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 10 }, @{ step = 'quit' })
         Expect   = @{ planBlocks = $false; greeted = $true; lingerSec = 100 }
     }
+    'host-owner-race' = @{
+        # Two players (two bot connections, same mods) grab the same item at the same moment, 8 rounds x 300 grabs each: after every round
+        # exactly one of them may believe it owns the item (audit finding 6: owner updates raced across the server's network threads)
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'; BotArgs = "--join 127.0.0.1 $Port --owner-race"
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 3; timeout = 300 },
+                     @{ step = 'wait'; seconds = 60 }, @{ step = 'quit' })
+        Expect   = @{ greeted = $false }
+    }
     'host-slow-download' = @{
         # The host's setup limit (shortened to 8 s with -amp-test-setup-timeout) must not kick a joiner whose download (64 MB at the host's
         # 4 MB/s upload limit, about 16 s) is still moving
