@@ -362,12 +362,17 @@ namespace AMP.Network.Data.Sync {
 
                 Imbue imbue = clientsideItem.imbues[p.index];
 
-                float energy = p.amount - imbue.energy;
-                if(imbue.spellCastBase == null) energy = p.amount;
-                if(imbue.spellCastBase != null && spellCastBase.hashId == imbue.spellCastBase.hashId) {
-                    imbue.UnloadCurrentSpell();
+                // The packet carries the absolute energy: another spell is unloaded, a missing one loaded, then the energy is set exactly
+                // (SetEnergyInstant(0) unloads by itself). networkItem.applyingRemoteImbue keeps the events this raises from being sent back.
+                NetworkItem ni = networkItem;
+                if(ni != null) ni.applyingRemoteImbue = true;
+                try {
+                    if(imbue.spellCastBase != null && imbue.spellCastBase.hashId != spellCastBase.hashId) imbue.UnloadCurrentSpell();
+                    if(imbue.spellCastBase == null && p.amount > 0) imbue.Transfer(spellCastBase, p.amount);
+                    imbue.SetEnergyInstant(p.amount);
+                } finally {
+                    if(ni != null) ni.applyingRemoteImbue = false;
                 }
-                imbue.Transfer(spellCastBase, energy);
 
                 //spellCastBase.Load(imbue, spellCastBase.level);
 

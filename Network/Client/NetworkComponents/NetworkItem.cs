@@ -145,7 +145,12 @@ namespace AMP.Network.Client.NetworkComponents {
             if(eventTime == EventTime.OnEnd) SendImbue(imbue, spellData, amount + change);
         }
 
+        internal bool applyingRemoteImbue; // ItemNetworkData.Apply(ItemImbuePacket) is changing the imbue: its events must not be sent back
+
+        // Only the item's owner reports its imbue. Applying a received imbue raises the same events; echoing those made the server send it
+        // back to the imbuer, whose Apply then computed new-minus-old energy: the imbuer's weapon lost its imbue about one round trip later.
         private void SendImbue(Imbue imbue, SpellCastCharge spellData, float energy) {
+            if(applyingRemoteImbue || !IsSending()) return;
             if(itemNetworkData.networkedId <= 0) return;
             if(lastImbueUpdate > Time.time - 0.25) return;
             if(spellData == null) return;
