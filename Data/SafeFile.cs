@@ -74,8 +74,9 @@ namespace AMP.Data {
             public Dictionary<string, ModSync.ModMatch> modMatches = new Dictionary<string, ModSync.ModMatch>();
             // "Host on PC" opens the port on the router by itself (UPnP) and removes it when hosting stops
             public bool     autoPortForward        = true;
-            // A joiner appears next to the host once it has loaded in (instead of the level's start point, far away on big maps)
-            public bool     spawnJoinersNearHost   = true;
+            // A joiner appears next to the host once it has loaded in (instead of the level's start point, far away on big maps).
+            // Off by default: a fixed-offset teleport with no ground or wall check, untested in dungeons.
+            public bool     spawnJoinersNearHost   = false;
 
             
             public bool useModWhitelist            = false;

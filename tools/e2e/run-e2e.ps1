@@ -93,6 +93,7 @@ $Scenarios = [ordered]@{
     }
     'host-gameplay' = @{
         GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
+        GameConfig = '{ "hostingSettings": { "spawnJoinersNearHost": true } }' # off by default; this scenario checks the teleport
         # The game sees the bot's avatar walk and its sword; the bot sees the host's player, its moves and the dagger the game spawns.
         # An idle player only sends its position every 5 s, hence the low seePlayerMoves. quietBeforeGreeting: no gameplay traffic during mod sync.
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 300 },
@@ -539,6 +540,12 @@ function Invoke-Scenario([string]$Name) {
     $seed = Join-Path $docs 'My Games\BladeAndSorcery\Saves\Default'
     New-Item -ItemType Directory -Force -Path $seed | Out-Null
     Copy-Item -LiteralPath (Get-ChildItem -LiteralPath $SavesSrc -Filter *.chr | Sort-Object Name | Select-Object -First 1).FullName, "$SavesSrc\Options.opt" -Destination $seed
+    if ($s.GameConfig) {
+        # AMP's config.json in the isolated save folder (fields left out keep their defaults)
+        $cfgDir = Join-Path $seed 'Mods\MultiplayerMod'
+        New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
+        Set-Content -LiteralPath (Join-Path $cfgDir 'config.json') -Encoding ascii -Value $s.GameConfig
+    }
     (ConvertTo-Json -InputObject @($s.Script) -Depth 5).Replace('{RUN}', $run.Replace('\', '\\')) | Set-Content -LiteralPath $script -Encoding ascii
     $timeoutMin = if ($s.TimeoutMin) { $s.TimeoutMin } else { $TimeoutMin }
     $botMods = Join-Path $run 'bot-mods'
