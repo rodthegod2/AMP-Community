@@ -166,6 +166,12 @@ namespace AMP.ModSync {
                 case "downloadAndRestart":  return DownloadAndRestart(n, step, state, statePath);
                 case "expectDownloadFails": return ExpectDownloadFails(step);
                 case "expectLeftOverSwap":  return ExpectLeftOverSwap();
+                case "expectImbue":         return ExpectImbue(step);
+                case "loadLevel":           return LoadLevel(step);
+                case "expectCreatureHealth": return ExpectCreatureHealth(step);
+                case "expectItemHeld":      return ExpectItemHeld(step);
+                case "expectItemFree":      return ExpectItemFree(step);
+                case "expectSyncConsistent": return ExpectSyncConsistent();
                 case "restoreMods":         return RestoreMods(n, state, statePath);
                 case "expectRejoined":      return ExpectRejoined(state);
                 case "expectModFolder":     return ExpectModFolder(step);
@@ -418,6 +424,117 @@ namespace AMP.ModSync {
             Debug.Log(Prefix + "INFO the setup failed as expected: " + error);
             if(error.Length == 0) failure = "the setup ended without an error";
             else if(step.Str("contains", null) != null && !error.Contains(step.Str("contains"))) failure = "the error doesn't say \"" + step.Str("contains") + "\": " + error;
+        }
+
+        private static ItemNetworkData RemoteItem(string dataId) {
+            return ModManager.clientSync?.syncData.items.Values.FirstOrDefault(i => i.dataId == dataId && i.clientsideId <= 0 && i.networkedId > 0);
+        }
+
+        // Another player's item is held or snapped by a player here (it has a hold state and the item sits in a holder or a hand)
+        private static IEnumerator ExpectItemHeld(AutopilotStep step) {
+            while(true) {
+                if(!Connected()) { failure = "not connected"; yield break; }
+                ItemNetworkData ind = RemoteItem(step.Str("dataId"));
+                if(ind != null && ind.clientsideItem != null && ind.holdingStates != null && ind.holdingStates.Length > 0 && (ind.clientsideItem.holder != null || ind.clientsideItem.IsHanded())) {
+                    Debug.Log(Prefix + "INFO " + ind.dataId + " (" + ind.networkedId + ") is held: " + ind.holdingStatesInfo + ", holder " + (ind.clientsideItem.holder != null ? ind.clientsideItem.holder.name : "hand"));
+                    yield break;
+                }
+                yield return Poll;
+            }
+        }
+
+        // Host: the player who held the item left; the item is still in the game here (not destroyed with the avatar), free (no hold
+        // state here or on the server) and still there holdSeconds later (audit finding 4)
+        private static IEnumerator ExpectItemFree(AutopilotStep step) {
+            Network.Server.Server server = ModManager.serverInstance;
+            if(server == null) { failure = "not hosting"; yield break; }
+            ItemNetworkData ind = RemoteItem(step.Str("dataId"));
+            if(ind == null) { failure = "no item " + step.Str("dataId") + " of another player"; yield break; }
+            int id = ind.networkedId;
+            while(server.Clients.Count() > 1) yield return Poll; // until the other player is gone
+            yield return new WaitForSecondsRealtime(step.Int("holdSeconds", 3));
+            ItemNetworkData serverCopy;
+            server.items.TryGetValue(id, out serverCopy);
+            ItemNetworkData now;
+            ModManager.clientSync.syncData.items.TryGetValue(id, out now);
+            string state = "server: " + (serverCopy == null ? "gone" : (serverCopy.holdingStates == null || serverCopy.holdingStates.Length == 0 ? "free" : "held " + serverCopy.holdingStatesInfo))
+                         + "; here: " + (now == null ? "no entry" : now.clientsideItem == null ? "object destroyed" : (now.holdingStates == null || now.holdingStates.Length == 0 ? "free" : "held") + " at " + now.clientsideItem.transform.position);
+            Debug.Log(Prefix + "INFO after the holder left, item " + id + ": " + state);
+            if(serverCopy == null || now == null || now.clientsideItem == null) failure = "the item is gone: " + state;
+            else if((serverCopy.holdingStates != null && serverCopy.holdingStates.Length > 0) || (now.holdingStates != null && now.holdingStates.Length > 0)) failure = "the item is still held by the player who left: " + state;
+            else if(now.clientsideItem.holder != null) failure = "the item is still in a holder: " + state;
+        }
+
+        // Another player's NPC of this type is spawned here with this current health (+-1), and the shared catalog entry of the type still
+        // has its own container (spawning remote NPCs must not change it)
+        private static IEnumerator ExpectCreatureHealth(AutopilotStep step) {
+            string type = step.Str("type");
+            while(true) {
+                if(!Connected()) { failure = "not connected"; yield break; }
+                CreatureNetworkData cnd = ModManager.clientSync.syncData.creatures.Values.FirstOrDefault(c => c.creatureType == type && c.creature != null && c.creature.initialized);
+                if(cnd != null) {
+                    float health = cnd.creature.currentHealth;
+                    string container = Catalog.GetData<CreatureData>(type, false)?.containerID;
+                    Debug.Log(Prefix + "INFO NPC " + type + " (" + cnd.networkedId + ") spawned with " + health.ToString("0.0") + " of " + cnd.creature.maxHealth.ToString("0.0") + " health; catalog container of " + type + ": " + container);
+                    if(Math.Abs(health - step.Int("health")) > 1f) failure = "the NPC has " + health.ToString("0.0") + " health, expected " + step.Int("health");
+                    else if(container == "Empty") failure = "spawning the NPC changed the shared catalog entry of " + type + " (container Empty)";
+                    yield break;
+                }
+                yield return Poll;
+            }
+        }
+
+        // Loads another level like the player would (the host's book); done when the player has spawned in it
+        private static IEnumerator LoadLevel(AutopilotStep step) {
+            string level = step.Str("level"), mode = step.Str("mode", "Sandbox");
+            LevelData data = Catalog.GetData<LevelData>(level, false);
+            if(data == null) { failure = "no level " + level + " (levels: " + string.Join(", ", Catalog.GetDataList<LevelData>().Select(l => l.id).ToArray()) + ")"; yield break; }
+            if(data.GetMode(mode) == null) { failure = "level " + level + " has no mode " + mode + " (modes: " + string.Join(", ", data.modes.Select(m => m.name).ToArray()) + ")"; yield break; }
+            SupportFunctions.LevelInfo.TryLoadLevel(level, mode, new System.Collections.Generic.Dictionary<string, string>());
+            yield return new WaitForSecondsRealtime(2f);
+            while(!(ModSwapClient.InPlayableLevel() && Level.current.data.id == level)) yield return Poll;
+            Debug.Log(Prefix + "INFO loaded " + level + " (" + mode + ")");
+        }
+
+        // Host: what this game's client has synced matches the server: every item/creature entry exists on the server and still has its
+        // object (or is waiting to be spawned). After a level change the old level's entries must be gone (audit finding 1).
+        private static IEnumerator ExpectSyncConsistent() {
+            Network.Server.Server server = ModManager.serverInstance;
+            if(server == null || ModManager.clientSync == null) { failure = "not hosting"; yield break; }
+            var problems = new System.Collections.Generic.List<string>();
+            foreach(var kv in ModManager.clientSync.syncData.items) {
+                if(!server.items.ContainsKey(kv.Key)) problems.Add("item " + kv.Key + " " + kv.Value.dataId + " isn't on the server");
+                else if(!ReferenceEquals(kv.Value.clientsideItem, null) && kv.Value.clientsideItem == null) problems.Add("item " + kv.Key + " " + kv.Value.dataId + " points at a destroyed object");
+            }
+            foreach(var kv in ModManager.clientSync.syncData.creatures) {
+                if(!server.creatures.ContainsKey(kv.Key)) problems.Add("creature " + kv.Key + " " + kv.Value.creatureType + " isn't on the server");
+            }
+            Debug.Log(Prefix + "INFO sync data: " + ModManager.clientSync.syncData.items.Count + " items, " + ModManager.clientSync.syncData.creatures.Count + " creatures here; "
+                      + server.items.Count + " items, " + server.creatures.Count + " creatures on the server");
+            if(problems.Count > 0) failure = problems.Count + " stale entries: " + string.Join("; ", problems.Take(5).ToArray());
+            yield break;
+        }
+
+        // Another player's item (dataId) is imbued here with spell, minEnergy..maxEnergy when it arrives, and still imbued holdSeconds later
+        private static IEnumerator ExpectImbue(AutopilotStep step) {
+            string spell = step.Str("spell");
+            float since = -1f;
+            while(true) {
+                if(!Connected()) { failure = "not connected"; yield break; }
+                ItemNetworkData ind = ModManager.clientSync.syncData.items.Values.FirstOrDefault(i => i.dataId == step.Str("dataId") && i.clientsideId <= 0 && i.clientsideItem != null);
+                Imbue imbue = ind != null && ind.clientsideItem.imbues.Count > 0 ? ind.clientsideItem.imbues[0] : null;
+                bool imbued = imbue != null && imbue.spellCastBase != null && imbue.spellCastBase.id == spell && imbue.energy >= step.Int("minEnergy")
+                           && imbue.energy <= step.Int("maxEnergy", 1000000);
+                if(since < 0 && imbue != null && imbue.spellCastBase != null && imbue.spellCastBase.id == spell && !imbued && imbue.energy > step.Int("maxEnergy", 1000000)) {
+                    failure = "the imbue has " + imbue.energy.ToString("0.0") + " energy, more than the " + step.Int("maxEnergy") + " sent";
+                    yield break;
+                }
+                if(imbued && since < 0) { since = Time.realtimeSinceStartup; Debug.Log(Prefix + "INFO " + ind.dataId + " (" + ind.networkedId + ") is imbued with " + spell + ", energy " + imbue.energy.ToString("0.0") + " of " + imbue.maxEnergy.ToString("0.0")); }
+                bool stillImbued = imbue != null && imbue.spellCastBase != null && imbue.spellCastBase.id == spell && imbue.energy > 0f; // it drains slowly by itself
+                if(since >= 0 && !stillImbued) { failure = "the imbue went away again (" + (imbue == null || imbue.spellCastBase == null ? "no spell" : imbue.spellCastBase.id + " " + imbue.energy.ToString("0.0")) + ")"; yield break; }
+                if(since >= 0 && Time.realtimeSinceStartup - since >= step.Int("holdSeconds", 0)) yield break;
+                yield return Poll;
+            }
         }
 
         // PC: this start found a Temporary swap that the last session (killed) didn't undo, said so, and offers "Restore my mods"

@@ -49,6 +49,10 @@ namespace AmpBot {
             foreach(string folder in x.downloaded) list.Expect("downloaded " + folder);
             foreach(string file in x.files) list.Expect("file " + file);
             if(x.greeted) list.Expect("greeted");
+            if(!string.IsNullOrEmpty(x.imbueSpell)) list.Expect("imbueNoEcho");
+            if(!string.IsNullOrEmpty(x.snapSlot)) list.Expect("snapped");
+            if(!string.IsNullOrEmpty(x.wanderTo)) list.Expect("pulledBack");
+            if(x.broughtToHost) list.Expect("broughtToHost");
             if(x.questResend) list.Expect("questResend");
             foreach(OptionValue v in x.snapshot) list.Expect("snapshot " + v.mod + "/" + v.option + (string.IsNullOrEmpty(v.title) ? "" : "=" + v.title));
             foreach(OptionValue v in x.settingChanged) list.Expect("settingChanged " + v.mod + "/" + v.option + "=" + v.title);
@@ -121,15 +125,41 @@ namespace AmpBot {
                 else if(p is ItemSpawnPacket) {
                     ItemSpawnPacket item = (ItemSpawnPacket) p;
                     bool ours = item.clientsideId == OurItem && player != null && item.type == x.playItem;
-                    if(ours) player.ItemHasId(item.itemId);
+                    if(ours) {
+                        player.ItemHasId(item.itemId);
+                        if(!string.IsNullOrEmpty(x.imbueSpell)) ImbueSoon(item.itemId);
+                        if(!string.IsNullOrEmpty(x.snapSlot)) SnapSoon(item.itemId);
+                    }
                     watch.OnItemSpawn(item, ours);
+                }
+                else if(p is PlayerTeleportPacket) {
+                    PlayerTeleportPacket tp = (PlayerTeleportPacket) p;
+                    Netamite.Datatype.Vector3 host = watch.LastOtherPosition;
+                    float d = (object) host == null ? -1f : (float) Math.Sqrt(Math.Pow(tp.targetPosition.x - host.x, 2) + Math.Pow(tp.targetPosition.z - host.z, 2));
+                    Out.Info("teleported to " + tp.targetPosition + (d >= 0 ? ", " + d.ToString("0.0") + " m from the host" : ""));
+                    if(d >= 0 && d < 5f) list.Mark("broughtToHost", d.ToString("0.0") + " m from the host's player");
+                }
+                else if(p is ItemImbuePacket) {
+                    ItemImbuePacket imbue = (ItemImbuePacket) p;
+                    Out.Info("imbue of item " + imbue.itemId + ": " + imbue.type + " " + imbue.amount);
+                    if(imbue.itemId == imbuedItem && DateTime.UtcNow < imbueWatchUntil) list.Fail("the host sent our own imbue of item " + imbue.itemId + " back (" + imbue.type + " " + imbue.amount + "): echo");
                 }
                 else if(p is ItemPositionPacket) watch.OnItemMoved((ItemPositionPacket) p);
                 else if(p is ItemOwnerPacket) Out.Info("item " + ((ItemOwnerPacket) p).itemId + (((ItemOwnerPacket) p).owning ? " is ours" : " belongs to someone else")); else if(p is LevelChangePacket) {
                     // Like a joiner that already is in the host's level: answer with the same level, loading finished
                     LevelChangePacket level = (LevelChangePacket) p;
                     Out.Info("host level " + level.level + " / " + level.mode + ", answering as loaded");
+                    if(wandered) list.Mark("pulledBack", "the host sent us back to " + level.level);
                     Send(new LevelChangePacket(level.level, level.mode, level.options, EventTime.OnEnd));
+                    if(!string.IsNullOrEmpty(x.wanderTo) && !wandered) {
+                        wandered = true;
+                        new Thread(() => {
+                            Thread.Sleep(5000);
+                            Out.Info("walking into " + x.wanderTo + " (the host doesn't allow map changes)");
+                            Send(new LevelChangePacket(x.wanderTo, "Sandbox", new string[0], EventTime.OnStart));
+                            Send(new LevelChangePacket(x.wanderTo, "Sandbox", new string[0], EventTime.OnEnd));
+                        }) { IsBackground = true }.Start();
+                    }
                 }
             } catch(Exception e) {
                 list.Fail("handling " + p.GetType().Name + " threw " + e);
@@ -137,6 +167,37 @@ namespace AmpBot {
         }
 
         private const int OurItem = 1; // clientsideId of the one item the bot spawns; the host echoes it with the network id
+
+        private volatile bool wandered;
+        private volatile int imbuedItem;
+        private DateTime imbueWatchUntil = DateTime.MaxValue;
+
+        // Like a player putting the sword on their back: 3 s after it has its id; marked done 4 s later (then the run ends and the bot leaves)
+        private void SnapSoon(int itemId) {
+            new Thread(() => {
+                Thread.Sleep(3000);
+                DrawSlot slot = (DrawSlot) Enum.Parse(typeof(DrawSlot), x.snapSlot);
+                Out.Info("snapping our item " + itemId + " to our " + slot);
+                client.SendReliable(new ItemSnapPacket { itemId = itemId, itemHoldingStates = new[] {
+                    new ItemHoldingState { holderNetworkId = client.ClientId, equipmentSlot = slot, holdingIndex = 0, orientationIndex = 0, holdingSide = Side.Right, holderType = ItemHolderType.PLAYER } } });
+                Thread.Sleep(4000);
+                list.Mark("snapped", "item " + itemId + " on our " + slot + "; leaving now");
+            }) { IsBackground = true, Name = "snap" }.Start();
+        }
+
+        // Like a player charging their own sword: 2 s after it has its id, imbue it once; the host must apply it and not send it back
+        private void ImbueSoon(int itemId) {
+            if(imbuedItem != 0) return;
+            imbuedItem = itemId;
+            new Thread(() => {
+                Thread.Sleep(2000);
+                imbueWatchUntil = DateTime.UtcNow.AddSeconds(4);
+                Out.Info("imbuing our item " + itemId + " with " + x.imbueSpell + " " + x.imbueAmount);
+                client.SendReliable(new ItemImbuePacket { itemId = itemId, type = x.imbueSpell, index = 0, amount = x.imbueAmount });
+                Thread.Sleep(4500);
+                if(list.Failure == null) list.Mark("imbueNoEcho", "no ItemImbuePacket for item " + itemId + " came back within 4 s");
+            }) { IsBackground = true, Name = "imbue" }.Start();
+        }
 
         // Like ClientSync.PlayerTickThread once transmission is allowed: player data, equipment, mod list, then positions
         private void StartPlaying() {

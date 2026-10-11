@@ -44,6 +44,10 @@ namespace AmpBot {
             Check<ItemPositionPacket>(folder, "ItemPositionPacket.cs", ids);
             Check<ItemOwnerPacket>(folder, "ItemOwnerPacket.cs", ids);
             Check<ModListPacket>(folder, "ModListPacket.cs", ids);
+            Check<ItemImbuePacket>(folder, "ItemImbuePacket.cs", ids);
+            Check<ItemSnapPacket>(folder, "ItemSnapPacket.cs", ids);
+            Check<PlayerTeleportPacket>(folder, "PlayerTeleportPacket.cs", ids);
+            Check<CreatureSpawnPacket>(folder, "CreatureSpawnPacket.cs", ids);
             Check<AllowTransmissionPacket>(folder, "AllowTransmissionPacket.cs", ids);
         }
 

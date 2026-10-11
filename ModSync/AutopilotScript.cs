@@ -46,6 +46,12 @@ namespace AMP.ModSync {
             { "downloadAndRestart",  "mode:mode" },
             { "expectDownloadFails", "mode:mode? contains:string?" }, // the setup starts and ends in an error without closing the game
             { "expectLeftOverSwap",  "" },                // PC: this start found a Temporary swap a killed session left behind
+            { "expectCreatureHealth", "type:string health:int[0-100000]" }, // another player's NPC of this type is here with this health
+            { "expectItemHeld",      "dataId:string" },   // another player's item is held/snapped here
+            { "expectItemFree",      "dataId:string holdSeconds:int[0-600]?" }, // host: after its holder left, the item still exists and is free
+            { "loadLevel",           "level:string mode:string?" },  // loads another level (the player starts a level change)
+            { "expectSyncConsistent", "" },               // host: every synced item/creature here exists on the server
+            { "expectImbue",         "dataId:string spell:string minEnergy:int[0-100000] maxEnergy:int[0-100000]? holdSeconds:int[0-600]?" }, // another player's item is imbued here
             { "restoreMods",         "" },                // presses "Restore my mods" (PC: the helper restores and relaunches the game)
             { "expectRejoined",      "" },
             { "expectModFolder",     "folder:folder present:bool" },

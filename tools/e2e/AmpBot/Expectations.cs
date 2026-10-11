@@ -32,6 +32,12 @@ namespace AmpBot {
         public int seePlayerMoves;         // position updates of another player that must arrive
         public List<string> seeItems = new List<string>(); // item ids another player must spawn
         public int seeItemMoves;           // position updates that must arrive for each of those items
+        public bool broughtToHost;         // join: the host teleports us next to its player after the greeting (spawnJoinersNearHost)
+        public string wanderTo;            // join: 5 s after the greeting, report being in this level (like walking through a portal); the host
+                                           // must send us back to its level ("pulledBack") and not kick us
+        public string snapSlot;            // join + play: once our item has its id, snap it to our own avatar's slot (BackRight...), then leave
+        public string imbueSpell;          // join + play: once our item has its id, imbue it with this spell (ItemImbuePacket) ...
+        public float imbueAmount = 50f;    // ... with this energy; no ItemImbuePacket for that item may come back within 4 s ("imbueNoEcho")
 
         // --host
         public string modSyncMode = ModSyncMode.Warn;
@@ -42,7 +48,9 @@ namespace AmpBot {
         public List<string> notServed = new List<string>();   // folders the joiner must not ask for (it gets them from mod.io)
         public int greetings = 1;          // joiners that must have been greeted
         public int dropAtPercent;          // > 0: the first download is cut off once this share of its bytes was sent ...
-        public string dropHow = "reset";   // ... "reset": the joiner's connection is reset (network loss); "quit": the host stops and hosts again 5 s later
+        public string dropHow = "reset";
+        public string spawnCreature;       // host: once a joiner's player data arrives, spawn this NPC next to it (CreatureSpawnPacket) ...
+        public float creatureHealth = 20f, creatureMaxHealth = 100f; // ... already damaged: health of maxHealth   // ... "reset": the joiner's connection is reset (network loss); "quit": the host stops and hosts again 5 s later
 
         public static Expectations Load(string path) {
             if(path == null) return new Expectations();

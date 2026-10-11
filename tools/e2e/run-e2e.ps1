@@ -98,7 +98,51 @@ $Scenarios = [ordered]@{
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 300 },
                      @{ step = 'expectRemotePlayers'; count = 1 }, @{ step = 'expectRemotePlayerMoved'; minDistance = 1 }, @{ step = 'expectItemSynced'; dataId = 'SwordShortCommon' },
                      @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'wait'; seconds = 10 }, @{ step = 'quit' })
-        Expect   = @{ greeted = $true; quietBeforeGreeting = $true; play = $true; playItem = 'SwordShortCommon'; equipment = @(); seePlayers = 1; seePlayerMoves = 3; seeItems = @('DaggerCommon'); seeItemMoves = 3; lingerSec = 15 }
+        Expect   = @{ greeted = $true; quietBeforeGreeting = $true; play = $true; playItem = 'SwordShortCommon'; equipment = @(); seePlayers = 1; seePlayerMoves = 3; seeItems = @('DaggerCommon'); seeItemMoves = 3; broughtToHost = $true; lingerSec = 15 }
+    }
+    'host-imbue' = @{
+        # The bot imbues its own sword with Fire, energy 50: the host's game shows exactly that (it was scaled by the receiving weapon's
+        # imbue rate: 100), still 5 s later, and doesn't send the imbue back (audit finding 2)
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 300 },
+                     @{ step = 'expectItemSynced'; dataId = 'SwordShortCommon' }, @{ step = 'expectImbue'; dataId = 'SwordShortCommon'; spell = 'Fire'; minEnergy = 49; maxEnergy = 51; holdSeconds = 5 },
+                     @{ step = 'wait'; seconds = 3 }, @{ step = 'quit' })
+        Expect   = @{ greeted = $true; play = $true; playItem = 'SwordShortCommon'; imbueSpell = 'Fire'; imbueAmount = 50; lingerSec = 15 }
+    }
+    'host-level-change' = @{
+        # The host loads another level while the bot plays (audit finding 1): the player who starts a level change got no clear from the
+        # server and kept every old item/NPC entry. After the load the host's sync data must match the server's.
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 300 },
+                     @{ step = 'expectItemSynced'; dataId = 'SwordShortCommon' }, @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'expectSyncConsistent' },
+                     @{ step = 'loadLevel'; level = 'Arena'; mode = 'Sandbox'; timeout = 300 }, @{ step = 'wait'; seconds = 10 }, @{ step = 'expectSyncConsistent' },
+                     @{ step = 'quit' })
+        Expect   = @{ greeted = $true; play = $true; playItem = 'SwordShortCommon'; seeItems = @('DaggerCommon'); lingerSec = 90 }
+    }
+    'host-holder-leaves' = @{
+        # The bot puts its sword on its back, then leaves (audit finding 4): the sword was destroyed with the avatar on every client and stayed
+        # "held" by nobody on the server. It must stay in the host's game, free, also on the server.
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 300 },
+                     @{ step = 'expectItemSynced'; dataId = 'SwordShortCommon' }, @{ step = 'expectItemHeld'; dataId = 'SwordShortCommon' },
+                     @{ step = 'expectItemFree'; dataId = 'SwordShortCommon'; holdSeconds = 5 }, @{ step = 'quit' })
+        ExpectLog = @('Player notice: AmpBot left')
+        Expect   = @{ greeted = $true; play = $true; playItem = 'SwordShortCommon'; snapSlot = 'BackRight'; lingerSec = 1 }
+    }
+    'host-map-change-off' = @{
+        # Map changes off: a player who walks into another level is sent back to the host's level instead of kicked (audit QOL 1)
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'setOption'; mod = 'MultiplayerMod'; option = 'Players Change Map'; title = 'Disabled' },
+                     @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 15 }, @{ step = 'quit' })
+        Expect   = @{ greeted = $true; wanderTo = 'Arena'; lingerSec = 2 }
+    }
+    'join-npc-health' = @{
+        # The bot host's NPC is already damaged (20 of 100): the joining game must spawn it at 20, not full health (audit 5), and spawning it
+        # must not change the game's shared HumanMale catalog entry (audit 13)
+        GameMods = $Base; BotMods = $Base; BotMode = 'host'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $false },
+                     @{ step = 'expectCreatureHealth'; type = 'HumanMale'; health = 20 }, @{ step = 'wait'; seconds = 3 }, @{ step = 'quit' })
+        Expect   = @{ reports = @('ready'); greetings = 1; spawnCreature = 'HumanMale'; creatureHealth = 20; creatureMaxHealth = 100; lingerSec = 10 }
     }
     'host-joincode' = @{
         # A friend on the same Wi-Fi: the game hosts, writes its Same Wi-Fi code (this PC's LAN address), the bot joins with that code.
@@ -252,7 +296,7 @@ $Scenarios = [ordered]@{
         BotArgs  = "--join 127.0.0.1 $Port --soak 62 --rejoin-every 600 --fake-igd $SsdpPort --fake-igd-lease 120"
         GameArgs = @('-amp-test-ssdp', "127.0.0.1:$SsdpPort", '-amp-test-lease', '120')
         Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'expectPortMapping'; state = 'Open' }) +
-                   @(1..64 | ForEach-Object { @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'wait'; seconds = 15 },
+                   @(1..70 | ForEach-Object { @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'wait'; seconds = 15 },
                                                @{ step = 'setOption'; mod = 'MultiplayerMod'; option = 'PvP'; title = 'Enabled' }, @{ step = 'wait'; seconds = 15 },
                                                @{ step = 'setOption'; mod = 'MultiplayerMod'; option = 'PvP'; title = 'Disabled' }, @{ step = 'wait'; seconds = 25 } }) +
                    @(@{ step = 'quit' })
@@ -667,6 +711,9 @@ function Invoke-Scenario([string]$Name) {
         $allLog = ($games | ForEach-Object { $_.log }) -join "`n"
         $exceptions = @([regex]::Matches($allLog, '(?m)^.*Exception.*$') | ForEach-Object { $_.Value })
         $events.Add("game log: $($exceptions.Count) exception line(s), $(@($exceptions | Where-Object { $_ -match 'AMP' }).Count) mentioning AMP")
+        foreach ($pattern in @($s.ExpectLog)) {
+            if ($pattern -and $allLog -notmatch $pattern -and -not $result.reason) { $result.reason = "the game log has no line matching '$pattern'" }
+        }
         $nan = [regex]::Matches($allLog, 'Infinity or NaN|infinite value').Count
         if ($s.NoNaN -and $nan -gt 0 -and -not $result.reason) { $result.reason = "the game log has $nan NaN/infinity errors (bad numbers from the network reached the game)" }
         $gameOk = $end -like 'AMPTEST DONE*'

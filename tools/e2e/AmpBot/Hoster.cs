@@ -199,6 +199,13 @@ namespace AmpBot {
                 data.clientId = c.ClientId; // the server decides who a player is
                 watch.OnPlayerData(data);
                 if(x.play) player.Start(BotPlayerId, data.playerPos ?? new Netamite.Datatype.Vector3(0, 0, 0), "AmpBot");
+                if(!string.IsNullOrEmpty(x.spawnCreature) && Interlocked.Exchange(ref creatureSent, 1) == 0) {
+                    Netamite.Datatype.Vector3 at = data.playerPos ?? new Netamite.Datatype.Vector3(0, 0, 0);
+                    var spawn = new CreatureSpawnPacket { creatureId = 700, clientsideId = 0, type = x.spawnCreature, container = "", factionId = 0,
+                                                          position = new Netamite.Datatype.Vector3(at.x + 3f, at.y, at.z), rotationY = 0, health = x.creatureHealth, maxHealth = x.creatureMaxHealth, height = 1.8f };
+                    server.SendTo(c, spawn);
+                    Out.Info("spawned NPC " + x.spawnCreature + " (700) with " + x.creatureHealth + " of " + x.creatureMaxHealth + " health next to client " + c.ClientId);
+                }
             } else if(p is PlayerEquipmentPacket) {
                 watch.OnEquipment((PlayerEquipmentPacket) p);
             } else if(p is PlayerRagdollPacket) {
@@ -220,6 +227,7 @@ namespace AmpBot {
         }
 
         private int dropped; // 1 once the download was cut off (dropAtPercent)
+        private int creatureSent;
 
         // Cuts the joiner off in the middle of its download, off the upload thread
         private void Drop(ClientInformation c, long sent, long total) {

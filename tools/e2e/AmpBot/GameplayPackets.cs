@@ -79,6 +79,57 @@ namespace AmpBot {
         [SyncedVar] public bool owning;
     }
 
+    public enum DrawSlot { None, BackRight, BackLeft, HipsRight, HipsLeft } // ThunderRoad Holder.DrawSlot (int)
+    public enum Side { Left, Right }                                        // ThunderRoad Side (int)
+    public enum ItemHolderType : byte { NONE, ITEM, PLAYER, CREATURE }      // AMP Datatypes.ItemHolderType
+
+    // AMP Network.Data.ItemHoldingState
+    public class ItemHoldingState {
+        [SyncedVar] public int            holderNetworkId;
+        [SyncedVar] public DrawSlot       equipmentSlot;
+        [SyncedVar] public byte           holdingIndex;
+        [SyncedVar] public byte           orientationIndex;
+        [SyncedVar] public Side           holdingSide;
+        [SyncedVar] public ItemHolderType holderType;
+    }
+
+    [PacketDefinition((byte) 24)] // ITEM_SNAPPING_SNAP
+    public class ItemSnapPacket : NetPacket {
+        [SyncedVar] public int                itemId;
+        [SyncedVar] public ItemHoldingState[] itemHoldingStates;
+    }
+
+    [PacketDefinition((byte) 16)] // PLAYER_TELEPORT
+    public class PlayerTeleportPacket : NetPacket {
+        [SyncedVar] public Vector3 targetPosition;
+        [SyncedVar] public float   targetRotation;
+    }
+
+    [PacketDefinition((byte) 26)] // ITEM_IMBUE
+    public class ItemImbuePacket : NetPacket {
+        [SyncedVar]       public int    itemId;
+        [SyncedVar]       public string type;
+        [SyncedVar]       public byte   index;
+        [SyncedVar(true)] public float  amount;
+    }
+
+    [PacketDefinition((byte) 50)] // CREATURE_SPAWN
+    public class CreatureSpawnPacket : NetPacket {
+        [SyncedVar]       public int      creatureId;
+        [SyncedVar]       public int      clientsideId;
+        [SyncedVar]       public string   type;
+        [SyncedVar]       public string   container;
+        [SyncedVar]       public byte     factionId;
+        [SyncedVar]       public Vector3  position;
+        [SyncedVar(true)] public float    rotationY;
+        [SyncedVar]       public float    health;
+        [SyncedVar]       public float    maxHealth;
+        [SyncedVar(true)] public float    height;
+        [SyncedVar]       public string[] equipment = new string[0];
+        [SyncedVar]       public Color[]  colors    = new Color[0];
+        [SyncedVar]       public string   ethnicGroup = "";
+    }
+
     [PacketDefinition((byte) 110)] // MOD_LIST
     public class ModListPacket : NetPacket {
         [SyncedVar] public string[] modList;
