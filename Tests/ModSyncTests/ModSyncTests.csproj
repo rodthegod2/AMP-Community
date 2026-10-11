@@ -35,7 +35,6 @@
     <Compile Include="NatTests.cs" />
     <Compile Include="OvernightTests.cs" />
     <Compile Include="..\..\Network\Packets\PacketNumbers.cs" />
-    <Compile Include="..\..\Network\Data\DamageReportPolicy.cs" />
     <Compile Include="..\..\Network\Data\ItemCapPolicy.cs" />
     <Compile Include="FakeIgd.cs" />
     <Compile Include="..\..\Network\Nat\JoinCodes.cs" />

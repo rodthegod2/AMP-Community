@@ -232,9 +232,7 @@ namespace AMP.Network.Client.NetworkComponents {
 
         private void Creature_OnDamageEvent(CollisionInstance collisionInstance, EventTime eventTime) {
             if(eventTime == EventTime.OnStart) return;
-            // Only the local player's hits: the player's own game applies NPC and environment damage, every observer reporting it too
-            // multiplied it (audit finding 3). The puppet's health goes back to full either way.
-            if(!Data.DamageReportPolicy.ReportPlayerPuppetDamage(collisionInstance.IsDoneByPlayer())) { creature.currentHealth = creature.maxHealth; return; }
+            //if(!collisionInstance.IsDoneByPlayer()) return; // Damage is not caused by the local player, so no need to mess with the other clients health
             if (collisionInstance.IsDoneByCreature(creature)) { Log.Warn(Defines.AMP, "SelfDamage"); return; } // If the damage is done by the creature itself, ignore it
             if(!collisionInstance.IsDoneByPlayer() && !collisionInstance.IsDoneByAnyCreature() && !collisionInstance.IsDoneByAnyProjectile()) { Log.Warn(Defines.AMP, "NonPlayerDamage"); return; }; // Only if the damage is done by a creature and not some random debris, should stop people from random death
             

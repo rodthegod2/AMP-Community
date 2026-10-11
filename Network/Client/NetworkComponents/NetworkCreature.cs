@@ -316,20 +316,6 @@ namespace AMP.Network.Client.NetworkComponents {
             Log.Debug(Defines.CLIENT, $"Healed {creatureNetworkData.creatureType} ({creatureNetworkData.networkedId}) with {heal} heal.");
         }
         
-        // The hit came from another player's avatar here: an item it held or threw last, its body, or its spell
-        private static bool DoneByRemotePlayer(CollisionInstance collisionInstance) {
-            Creature attacker = null;
-            ColliderGroup source = collisionInstance.sourceColliderGroup;
-            if(source != null && source.collisionHandler != null) {
-                Item item = source.collisionHandler.item;
-                if(item != null && item.lastHandler != null) attacker = item.lastHandler.creature;
-                else if(source.collisionHandler.ragdollPart != null) attacker = source.collisionHandler.ragdollPart.ragdoll.creature;
-            } else if(collisionInstance.casterHand != null && collisionInstance.casterHand.mana != null) {
-                attacker = collisionInstance.casterHand.mana.creature;
-            }
-            return attacker != null && attacker.GetComponent<NetworkPlayerCreature>() != null;
-        }
-
         private void Creature_OnDamageEvent(CollisionInstance collisionInstance, EventTime eventTime) {
             //if(!collisionInstance.IsDoneByPlayer()) {
             //    creature.currentHealth = creatureNetworkData.health;
@@ -337,9 +323,6 @@ namespace AMP.Network.Client.NetworkComponents {
             //}
             if(collisionInstance.IsDoneByCreature(creatureNetworkData.creature)) return; // If the damage is done by the creature itself, ignore it
             if(creatureNetworkData.networkedId <= 0) return;
-            // One report per hit (audit finding 3): a remote player's hit comes from that player's client, other causes from the NPC's owner.
-            // Not reporting leaves the local health alone: the reporter's change arrives and sets it.
-            if(!Data.DamageReportPolicy.ReportCreatureDamage(collisionInstance.IsDoneByPlayer(), DoneByRemotePlayer(collisionInstance), IsSending())) return;
             
             float damage = creatureNetworkData.creature.currentHealth - creatureNetworkData.health; // Should be negative
             if(damage >= 0) return; // No need to send it, if there was no damaging
