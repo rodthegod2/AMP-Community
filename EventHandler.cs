@@ -67,6 +67,8 @@ namespace AMP {
                 LevelFunc.DisableCleanup();
             } else if(eventTime == EventTime.OnStart) {
                 ModManager.clientInstance.allowTransmission = false;
+                Network.Packets.Implementation.PrepareLevelChangePacket.ResetWorldState(); // the old level's entries are stale now
+                ModManager.clientInstance.clearedItems = false;
             }
 
             string currentLevel, currentMode;
