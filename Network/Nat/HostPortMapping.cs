@@ -13,6 +13,7 @@ namespace AMP.Network.Nat {
 
         private static PortMapper current; // kept after Stop so quitting can wait for its deletes
         private static bool hosting;
+        private static bool cleanupWaited; // quitting runs Exit twice (OnApplicationQuit, OnDestroy): block at most once
 
         // null when not hosting by IP
         internal static PortMapStatus Status { get { return hosting ? current?.Status : null; } }
@@ -31,19 +32,20 @@ namespace AMP.Network.Nat {
             previous?.Stop();
             current = new PortMapper(port, message => Log.Info(Defines.SERVER, message));
             hosting = true;
+            cleanupWaited = false;
 
             bool testRun = AppDomain.CurrentDomain.GetData("AMP_TEST_ISOLATED") != null;
             string testTarget = testRun ? ModSync.AutopilotScript.FindArg(Environment.GetCommandLineArgs(), TestSsdpFlag) : null;
             if(testTarget != null) {
                 IPEndPoint target = ParseEndpoint(testTarget);
-                if(target == null) { current.TurnOff("bad " + TestSsdpFlag + " value"); return; }
+                if(target == null) { current.TurnOff("bad " + TestSsdpFlag + " value", previous); return; }
                 current.SearchTarget = target;
                 Log.Info(Defines.SERVER, "UPnP: test run, using the fake router at " + target);
             } else if(testRun) {
-                current.TurnOff("test run");
+                current.TurnOff("test run", previous);
                 return;
             } else if(!ModManager.safeFile.hostingSettings.autoPortForward) {
-                current.TurnOff("autoPortForward is false in config.json");
+                current.TurnOff("autoPortForward is false in config.json", previous);
                 return;
             }
             current.Start(previous);
@@ -56,6 +58,8 @@ namespace AMP.Network.Nat {
 
         // Quitting: give the router a moment to remove the mappings (a lease ends them anyway)
         internal static void WaitForCleanup(int timeoutMs) {
+            if(cleanupWaited) return;
+            cleanupWaited = true;
             current?.WaitDone(timeoutMs);
         }
 

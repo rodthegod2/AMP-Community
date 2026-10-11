@@ -1797,7 +1797,7 @@ namespace AMP.UI {
                         info = $"[ Hosting Steam {Defines.FULL_MOD_VERSION} ]";
                     else
                     #endif
-                        info = $"[ Hosting Server {Defines.FULL_MOD_VERSION} | Port {ModManager.safeFile.inputCache.host_port} | LAN IP {LocalNetworkAddress()} ]";
+                        info = $"[ Hosting Server {Defines.FULL_MOD_VERSION} | Port {ModManager.safeFile.inputCache.host_port} | LAN IP {Network.Nat.HostPortMapping.Status?.LocalIp?.ToString() ?? "..."} ]";
                 } else if(ModManager.clientInstance != null) {
                     #if STEAM
                     if(ModManager.clientInstance.netclient is SteamClient)
@@ -3128,12 +3128,5 @@ namespace AMP.UI {
             ShowPage(Page.IpHosting);
         }
 
-        private static string localNetworkAddress;
-        private static string LocalNetworkAddress() {
-            if(localNetworkAddress != null) return localNetworkAddress;
-            // The interface that reaches the internet (a VM/WSL adapter first in the DNS list would be wrong)
-            localNetworkAddress = Network.Nat.LocalAddress.Lan()?.ToString() ?? "unknown";
-            return localNetworkAddress;
-        }
     }
 }

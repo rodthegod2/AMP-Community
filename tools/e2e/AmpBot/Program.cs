@@ -58,8 +58,8 @@ namespace AmpBot {
             Expectations x = Expectations.Load(expect);
             var list = new Checklist();
             DateTime deadline = DateTime.UtcNow.AddSeconds(x.timeoutSec);
-            // A fake UPnP router on 127.0.0.1 whose "internet address" is 127.0.0.1, so the game's Internet code works here
-            FakeIgd igd = fakeIgdPort == null ? null : new FakeIgd(ssdpPort) { ExternalIp = "127.0.0.1" };
+            // A fake UPnP router on 127.0.0.1; its internet address is 203.0.113.7 (TEST-NET-3, public for AMP)
+            FakeIgd igd = fakeIgdPort == null ? null : new FakeIgd(ssdpPort);
             if(igd != null) Out.Info("fake UPnP router answering SSDP on 127.0.0.1:" + ssdpPort);
             if(codeFile != null && !JoinByCode(codeFile, deadline, out join, out port)) return Finish(false, list);
             bool ok;

@@ -31,6 +31,7 @@ $FasciaId  = 5966899                                         # mod.io Fascia (se
 $ZeroEffortId = 2512494                                      # mod.io "Zero Effort", the _TrueZeroEffort fixture
 $SsdpPort  = $Port + 10                                      # the bot's fake UPnP router (host-upnp-fake)
 $Code127   = 'HW22-22DB-AWJ6'                               # join code of 127.0.0.1:26951 (pinned in Tests/ModSyncTests/NatTests.cs)
+$CodeFake  = 'TE29-43VB-AX3L'                               # join code of 203.0.113.7:26951, the fake router's internet address (pinned there too)
 # The player's real mod.io data (login, subscriptions, installed mod.io mods): tests isolate mod.io into the run folder, this proves it
 $ModioReal = @((Join-Path $env:LOCALAPPDATA 'mod.io\03852'), (Join-Path $env:LOCALAPPDATA 'mod.io\globalsettings.json'), (Join-Path $env:PUBLIC 'mod.io\3852'))
 
@@ -79,11 +80,13 @@ $Scenarios = [ordered]@{
     }
     'host-upnp-fake' = @{
         # The full UPnP flow against the bot's fake router (-amp-test-ssdp, honoured only in test runs): SSDP, description, external address,
-        # TCP+UDP mapped with lease 7200, the Internet code (the fake's internet address is 127.0.0.1) lets the bot join, both mappings removed on quit
+        # TCP+UDP mapped with lease 7200, the Internet code is the fake's internet address (203.0.113.7), the bot joins with the Same Wi-Fi code
+        # (127.0.0.1: this PC as the router sees it), both mappings removed on quit
         GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'; BotArgs = "--join-code-file {RUN}\joincode.txt --fake-igd $SsdpPort"
         GameArgs = @('-amp-test-ssdp', "127.0.0.1:$SsdpPort")
-        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'expectPortMapping'; state = 'Open' },
-                     @{ step = 'writeJoinCode'; file = '{RUN}\joincode.txt'; kind = 'internet' }, @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 5 }, @{ step = 'quit' })
+        Skip     = { if ($Port -ne 26951) { "the pinned code is for port 26951 (this run uses $Port)" } }
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'expectPortMapping'; state = 'Open'; internetCode = $CodeFake },
+                     @{ step = 'writeJoinCode'; file = '{RUN}\joincode.txt'; kind = 'lan' }, @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 5 }, @{ step = 'quit' })
         Expect   = @{ planBlocks = $false; greeted = $true; lingerSec = 2 }
     }
     'join-identical' = @{

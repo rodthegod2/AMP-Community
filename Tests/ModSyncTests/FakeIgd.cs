@@ -15,7 +15,10 @@ public class FakeIgd : IDisposable {
 
     public string ServiceType = "urn:schemas-upnp-org:service:WANIPConnection:1";
     public string ExternalIp = "203.0.113.7";
-    public bool RejectLeases;        // 725 OnlyPermanentLeasesSupported for any lease > 0
+    public bool RejectLeases;        // 725 OnlyPermanentLeasesSupported for any lease > 0 (of RejectLeasesFor only, when set)
+    public string RejectLeasesFor;   // "TCP" / "UDP" / null = both
+    public readonly Dictionary<string, int> AddFault = new Dictionary<string, int>(); // protocol -> UPnP error for every AddPortMapping
+    public int DeleteDelayMs;        // a slow router: each DeletePortMapping is answered (and done) this much later
     public bool NoGetSpecific;       // 401 Invalid Action for GetSpecificPortMappingEntry
     public bool Silent;              // doesn't answer SSDP at all
     public readonly Dictionary<string, Mapping> Mappings = new Dictionary<string, Mapping>(); // "TCP 26950"
@@ -116,6 +119,7 @@ public class FakeIgd : IDisposable {
         Func<string, string> arg = name => { XmlNode n = doc.SelectSingleNode("//*[local-name()='" + name + "']"); return n == null ? "" : n.InnerText; };
         string key = arg("NewProtocol") + " " + arg("NewExternalPort");
         status = 200;
+        if(action == "DeletePortMapping" && DeleteDelayMs > 0) Thread.Sleep(DeleteDelayMs);
         lock(Gate) {
             switch(action) {
                 case "GetExternalIPAddress":
@@ -124,7 +128,9 @@ public class FakeIgd : IDisposable {
                 case "AddPortMapping": {
                     int lease = int.Parse(arg("NewLeaseDuration"));
                     Calls.Add(action + " " + key + " " + arg("NewInternalClient") + " " + lease + " " + arg("NewPortMappingDescription"));
-                    if(RejectLeases && lease > 0) return Fault(725, "OnlyPermanentLeasesSupported", out status);
+                    int fault;
+                    if(AddFault.TryGetValue(arg("NewProtocol"), out fault)) return Fault(fault, "Refused for this test", out status);
+                    if(RejectLeases && lease > 0 && (RejectLeasesFor == null || RejectLeasesFor == arg("NewProtocol"))) return Fault(725, "OnlyPermanentLeasesSupported", out status);
                     Mapping existing;
                     if(Mappings.TryGetValue(key, out existing) && existing.Client != arg("NewInternalClient")) return Fault(718, "ConflictInMappingEntry", out status);
                     Mappings[key] = new Mapping { Client = arg("NewInternalClient"), Description = arg("NewPortMappingDescription"), Lease = lease };

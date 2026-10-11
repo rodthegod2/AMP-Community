@@ -40,8 +40,10 @@ JOIN CODE on the AMP page, like  K7QX-29MB :
  - "Same Wi-Fi code": for friends in the same house / on the same Wi-Fi.
  - below them: your plain IP:port and what your router said.
 Send your friends the code. The code is just your address in short form:
-give it only to people you want to play with. A new code can appear when
-your internet provider gives you a new address.
+give it only to people you want to play with, and when you host over the
+internet set a password (host_password, below) - anyone who has your code
+or IP can try to join. A new code can appear when your internet provider
+gives you a new address.
 
 The port is removed from your router again when you stop hosting or quit
 the game (AMP only removes what it added; a port you forwarded yourself is
@@ -51,15 +53,17 @@ Windows may ask whether Blade & Sorcery may use the network the first
 time: click Allow. (AMP never changes your firewall settings.)
 
 When the page says internet joining doesn't work:
- - "Your internet provider shares your IP ... needs a relay": your
-   provider (or a second router in front of yours) doesn't give you your
-   own internet address (CGNAT). Port forwarding can't fix that. Use the
-   Same Wi-Fi code at home, or a VPN like Tailscale (below).
+ - "Your internet provider (or a second router in front of yours) shares
+   your IP ... needs a relay": you don't have your own internet address
+   (CGNAT), or your router sits behind another router (e.g. the provider's
+   modem-router). Use the Same Wi-Fi code at home, or a VPN like Tailscale
+   (below); with two routers, forwarding the port on the outer one (or
+   putting it in bridge mode) also works.
  - "No router answered the automatic port opening": turn on UPnP in your
    router's settings (often under "NAT", "Advanced" or "Gaming"), host
    again - or forward the port by hand (below).
- - "Your router refused to open port ...": forward it by hand (below), or
-   pick another port if another device already uses it.
+ - "Your router refused to open port ...": forward it by hand (below) and
+   host again, or pick another port if another device already uses it.
 
 Fallbacks (only when the code doesn't work):
  a) Tailscale (tailscale.com, free) or ZeroTier: everyone installs it and
@@ -88,8 +92,9 @@ Book -> Mods -> AMP -> "Join" -> "Join Code / IP".
 Type the host's code into "Code or IP" with the book's keyboard (capital
 or small letters, the dash is optional; codes never contain 0, O, 1 or I),
 the password if there is one, then press ">".
-An IP address works in the same field too: 192.168.1.20 (uses the Port
-field) or 203.0.113.5:26950.
+An IP address or PC name works in the same field too: 192.168.1.20 (uses
+the Port field), 203.0.113.5:26950, or a name like gamingpc or a Tailscale
+name. IPv6 addresses don't work; use the IPv4 address or the code.
 (Desktop window, H key: "Join Server ->", the code goes into "IP".)
 
 If it fails you get a message:

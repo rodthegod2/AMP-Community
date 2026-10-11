@@ -47,6 +47,7 @@ internal static partial class Program {
         T("pinned code 127.0.0.1:26951", JoinCodes.Encode(Ip("127.0.0.1"), 26951) == "HW22-22DB-AWJ6");
         T("pinned code 203.0.113.7:26950", JoinCodes.Encode(Ip("203.0.113.7"), 26950) == "TE29-43W4");
         T("pinned code 192.168.1.50:26950", JoinCodes.Encode(Ip("192.168.1.50"), 26950) == "S4N2-4EKS");
+        T("pinned code 203.0.113.7:26951 (E2E host-upnp-fake)", JoinCodes.Encode(Ip("203.0.113.7"), 26951) == "TE29-43VB-AX3L");
         T("pinned codes decode", Decodes("HW22-22DB-AWJ6", "127.0.0.1", 26951) && Decodes("TE29-43W4", "203.0.113.7", 26950));
 
         T("codes are case-insensitive and ignore dashes and spaces", Decodes("te2943w4", "203.0.113.7", 26950) && Decodes(" te29 - 43w4 ", "203.0.113.7", 26950) && Decodes("TE 29 43 W4", "203.0.113.7", 26950));
@@ -111,7 +112,13 @@ internal static partial class Program {
         T("a code for a port above 32767 is refused", TargetError(JoinCodes.Encode(Ip("1.2.3.4"), 40000), "") != null);
         T("empty input asks for a code or IP", TargetError("  ", "26950").Contains("join code or an IP"));
         T("a bad code explains the code rules", TargetError("TE2O-43W4", "26950").Contains("0, O, 1 or I"));
-        T("broken addresses are refused", TargetError(":26950", "") != null && TargetError("1.2.3.4:", "") != null && TargetError("1.2 3.4", "26950") != null);
+        T("broken addresses are refused", TargetError(":26950", "") != null && TargetError("1.2.3.4:", "") != null && TargetError("1.2 3.4", "26950") != null && TargetError("a_b!", "26950") != null);
+        T("bare host names (PC names, Tailscale names) work", Target("gamingpc", "26950", "gamingpc", 26950) && Target("desktop-ab12", "26950", "desktop-ab12", 26950)
+            && Target("gamerpc7", "26950", "gamerpc7", 26950) && Target("DESKTOP1:27000", "", "DESKTOP1", 27000) && Target("mybox", "26950", "mybox", 26950));
+        T("a trailing dot is ignored (codes and host names)", Target("TE29-43W4.", "", "203.0.113.7", 26950) && Target("host.example.:5", "", "host.example", 5));
+        T("IPv6 gets a clear message", TargetError("fe80::1", "26950").Contains("IPv6") && TargetError("[::1]:26950", "").Contains("IPv6"));
+        T("code-shaped input keeps the code errors", TargetError("TE29-43W5", "26950").Contains("typo") && TargetError("TE29 43W5", "26950").Contains("typo")
+            && TargetError("TE2I-43W4", "26950").Contains("0, O, 1 or I"));
     }
 
     private static void NatRuleTests() {
@@ -121,6 +128,9 @@ internal static partial class Program {
         T("192.168/16 is shared", c("192.168.0.0") == AddressClass.Shared && c("192.168.255.255") == AddressClass.Shared && c("192.167.255.255") == AddressClass.Public && c("192.169.0.0") == AddressClass.Public);
         T("100.64/10 (CGNAT) is shared", c("100.64.0.0") == AddressClass.Shared && c("100.127.255.255") == AddressClass.Shared && c("100.63.255.255") == AddressClass.Public && c("100.128.0.0") == AddressClass.Public);
         T("public and missing addresses", c("8.8.8.8") == AddressClass.Public && c("0.0.0.0") == AddressClass.None && NatRules.Classify(null) == AddressClass.None && NatRules.Classify(IPAddress.IPv6Loopback) == AddressClass.None);
+        T("unusable addresses are not public (0/8, 127/8, 169.254/16, 198.18/15, 224+)", c("0.1.2.3") == AddressClass.None && c("127.0.0.1") == AddressClass.None && c("169.254.9.9") == AddressClass.None
+            && c("198.18.0.1") == AddressClass.None && c("198.19.255.255") == AddressClass.None && c("198.20.0.0") == AddressClass.Public && c("224.0.0.1") == AddressClass.None
+            && c("255.255.255.255") == AddressClass.None && c("223.255.255.255") == AddressClass.Public && c("169.253.0.1") == AddressClass.Public && c("128.0.0.1") == AddressClass.Public);
     }
 
     private static void SsdpTests() {
@@ -214,7 +224,7 @@ internal static partial class Program {
             PortMapStatus s = Settle(m);
             T("lease refused (725): a permanent mapping instead", s.State == MapState.Open && s.LeaseSeconds == 0 && igd.CallList().Contains("AddPortMapping UDP 26950 127.0.0.1 0 AMP Community"));
             Thread.Sleep(1500);
-            T("permanent mappings are not renewed", igd.CallList().Count(c => c.StartsWith("AddPortMapping")) == 3);
+            T("permanent mappings are not renewed", igd.CallList().Count(c => c.StartsWith("AddPortMapping")) == 4);
             m.Stop(); m.WaitDone(10000);
             T("permanent mappings are removed on stop", igd.MappingCount() == 0);
         }
@@ -238,7 +248,7 @@ internal static partial class Program {
                 PortMapStatus s = Settle(m);
                 m.Stop(); m.WaitDone(10000);
                 T("shared internet address " + shared + ": no mapping, relay message, no internet code", s.State == MapState.Shared && !igd.CallList().Any(c => c.StartsWith("AddPortMapping"))
-                    && s.InternetCode == null && s.Describe()[0].Contains("internet provider shares your IP") && s.Describe()[0].Contains("same Wi-Fi still works"));
+                    && s.InternetCode == null && s.Describe()[0].Contains("shares your IP") && s.Describe()[0].Contains("second router") && s.Describe()[0].Contains("same Wi-Fi still works"));
             }
         }
 
@@ -256,8 +266,8 @@ internal static partial class Program {
             m.Start();
             PortMapStatus s = Settle(m);
             m.Stop(); m.WaitDone(10000);
-            T("port forwarded to another device: refused, explained, internet code still shown", s.State == MapState.Refused && s.Detail.Contains("another device (192.168.1.99)")
-                && s.Describe().Any(l => l.Contains("forward port 26950 (TCP+UDP) to this PC by hand")) && s.InternetCode != null);
+            T("port forwarded to another device: refused, explained, no internet code", s.State == MapState.Refused && s.Detail.Contains("another device (192.168.1.99)")
+                && s.Describe().Any(l => l.Contains("Forward port 26950 (TCP+UDP) to this PC by hand")) && s.InternetCode == null);
             T("port forwarded to another device: that mapping is untouched", igd.MappingCount() == 1 && igd.Mappings["TCP 26950"].Client == "192.168.1.99"
                 && !igd.CallList().Any(c => c.StartsWith("AddPortMapping") || c.StartsWith("DeletePortMapping")));
         }
@@ -319,6 +329,69 @@ internal static partial class Program {
                 && Array.LastIndexOf(igd.CallList(), "DeletePortMapping UDP 26950") < Array.LastIndexOf(igd.CallList(), "AddPortMapping UDP 26950 127.0.0.1 7200 AMP Community"));
             second.Stop(); second.WaitDone(10000);
             T("hosting again: removed on the last stop", igd.MappingCount() == 0);
+        }
+
+        // I-1: leases are per protocol; only 725/402 mean "permanent only"
+        using(var igd = new FakeIgd { RejectLeases = true, RejectLeasesFor = "UDP" }) {
+            PortMapper m = Mapper(igd, port);
+            m.LeaseSeconds = 2;
+            m.Start();
+            PortMapStatus s = Settle(m);
+            Thread.Sleep(3600);
+            string[] calls = igd.CallList();
+            T("mixed leases: TCP keeps its lease, only UDP is permanent", s.State == MapState.Open && igd.Mappings["TCP 26950"].Lease == 2 && igd.Mappings["UDP 26950"].Lease == 0);
+            T("mixed leases: the leased TCP mapping is still renewed (" + m.Renewals + ")", m.Renewals >= 2 && calls.Count(c => c == "AddPortMapping TCP 26950 127.0.0.1 2 AMP Community") >= 3
+                && calls.Count(c => c.StartsWith("AddPortMapping UDP")) == 2);
+            m.Stop(); m.WaitDone(10000);
+            T("mixed leases: both removed on stop", igd.MappingCount() == 0);
+        }
+
+        using(var igd = new FakeIgd()) {
+            igd.AddFault["UDP"] = 501;
+            PortMapper m = Mapper(igd, port);
+            m.Start();
+            PortMapStatus s = Settle(m);
+            T("another error is not a lease problem: no permanent retry, refused", s.State == MapState.Refused && !igd.CallList().Any(c => c.Contains(" 0 AMP Community")));
+            m.Stop(); m.WaitDone(10000);
+            T("refused half way: the TCP mapping already made is removed", igd.MappingCount() == 0 && igd.CallList().Contains("DeletePortMapping TCP 26950"));
+        }
+
+        // SHOULD 3: a router that can't be read: a leased mapping is managed, a permanent one is never removed (it could be a forward by hand)
+        using(var igd = new FakeIgd { NoGetSpecific = true, RejectLeases = true }) {
+            PortMapper m = Mapper(igd, port);
+            m.Start();
+            PortMapStatus s = Settle(m);
+            m.Stop(); m.WaitDone(10000);
+            T("unreadable router + permanent mapping: open, never deleted", s.State == MapState.Open && igd.MappingCount() == 2 && !igd.CallList().Any(c => c.StartsWith("DeletePortMapping")));
+        }
+
+        // I-2: a slow router: the old session's deletes take longer than any fixed wait; the new session must not start before them
+        using(var igd = new FakeIgd { DeleteDelayMs = 6000 }) {
+            PortMapper first = Mapper(igd, port);
+            first.CallTimeoutMs = 10000;
+            first.Start();
+            Settle(first);
+            PortMapper second = Mapper(igd, port);
+            first.Stop();
+            second.Start(first);
+            for(int i = 0; i < 400 && !(second.Status.State == MapState.Open && igd.MappingCount() == 2); i++) Thread.Sleep(50);
+            Thread.Sleep(500);
+            string[] calls = igd.CallList();
+            T("slow router, hosting again: the new mappings survive the old session's slow deletes", second.Status.State == MapState.Open && igd.MappingCount() == 2
+                && Array.LastIndexOf(calls, "DeletePortMapping UDP 26950") < Array.IndexOf(calls, "AddPortMapping TCP 26950 127.0.0.1 7200 AMP Community", Array.LastIndexOf(calls, "DeletePortMapping TCP 26950")));
+            igd.DeleteDelayMs = 0;
+            second.Stop(); second.WaitDone(10000);
+            T("slow router: removed on the last stop", igd.MappingCount() == 0);
+        }
+
+        // Turned off: no router traffic at all, but the Same Wi-Fi address is known
+        using(var igd = new FakeIgd()) {
+            PortMapper m = Mapper(igd, port);
+            m.TurnOff("test run");
+            PortMapStatus s = Settle(m);
+            m.Stop();
+            T("turned off: Off, LAN address known, nothing sent to the router", m.WaitDone(10000) && s.State == MapState.Off && s.LocalIp != null && igd.CallList().Length == 0 && s.InternetCode == null
+                && s.Describe()[0].Contains("off (test run)"));
         }
     }
 

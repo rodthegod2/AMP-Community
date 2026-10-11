@@ -63,7 +63,7 @@ namespace AMP.ModSync {
             // This start found a swap that was never undone, undid it in-game (Quest) and is closing by itself: folder (installed by the swap) is gone
             { "expectStartupRestore", "folder:folder" },
             // Hosting by IP: the router port mapping reached this state (Network/Nat/PortMapper.cs MapState: Off, Open, Shared, NoRouter, ...)
-            { "expectPortMapping",   "state:string" },
+            { "expectPortMapping",   "state:string internetCode:string?" },
             // Hosting by IP: writes the "lan" or "internet" join code into file (absolute path) for the bot
             { "writeJoinCode",       "file:string kind:string" },
             { "quit",                "" },

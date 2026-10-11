@@ -1,7 +1,9 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
+using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace AMP.Network.Nat {
     // Join codes: an IPv4 address (and port) in a short, typo-checked form, e.g. "K7QX-29MB". Pure, no Unity.
@@ -110,32 +112,54 @@ namespace AMP.Network.Nat {
         }
     }
 
-    // What the player typed into the join field: a join code, an IP, IP:port, host:port or localhost (the port field is used when
-    // the text has no port of its own; a code brings its own port).
+    // What the player typed into the join field: a join code, an IPv4 address, a host name (with or without dots, e.g. "gamingpc" or a
+    // Tailscale name), each optionally with ":port" (else the port field is used; a code brings its own port).
+    // It is a code when, without dashes/spaces, it is 8 or 12 code-alphabet characters with a valid checksum. Code errors (typo, 0/O/1/I)
+    // are only reported for input in the code's own shape (groups of 4 split by dashes or spaces); anything else is a host name.
     public static class JoinTarget {
         public const int MaxPort = 32767; // Netamite stores ports as short
+
+        private static readonly Regex CodeShape = new Regex(@"^[A-Za-z0-9]{4}([- ]+[A-Za-z0-9]{4}){1,2}$");
+        private static readonly Regex HostName = new Regex(@"^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$");
 
         public static bool TryParse(string text, string portText, out string host, out int port, out string error) {
             host = null; port = 0; error = null;
             text = text?.Trim() ?? "";
             if(text.Length == 0) { error = "Enter a join code or an IP address."; return false; }
 
-            if(text.IndexOf('.') >= 0 || text.IndexOf(':') >= 0 || text.Equals("localhost", StringComparison.OrdinalIgnoreCase)) {
-                int colon = text.LastIndexOf(':');
-                if(colon >= 0) {
-                    portText = text.Substring(colon + 1);
-                    text = text.Substring(0, colon).Trim();
+            // Netamite connects over IPv4 only, and AMP hosts listen on IPv4
+            if(text.StartsWith("[") || text.Count(c => c == ':') >= 2) { error = "IPv6 isn't supported - use the host's IPv4 address or a join code."; return false; }
+
+            string candidate = text.TrimEnd('.');
+            string compact = JoinCodes.Normalize(candidate);
+            bool codeShaped = CodeShape.IsMatch(candidate);
+            IPAddress address;
+            if(compact != null && (compact.Length == JoinCodes.ShortLength || compact.Length == JoinCodes.LongLength)) {
+                string codeError;
+                if(JoinCodes.TryDecode(compact, out address, out port, out codeError)) {
+                    if(port > MaxPort) { error = "This code is for port " + port + "; AMP ports go up to " + MaxPort + "."; port = 0; return false; }
+                    host = address.ToString();
+                    return true;
                 }
-                if(text.Length == 0 || text.IndexOf(' ') >= 0 || text.IndexOf(':') >= 0) { error = "\"" + text + "\" isn't an address."; return false; }
-                if(!TryPort(portText, out port)) { error = "The port must be a number from 1 to " + MaxPort + "."; return false; }
-                host = text;
-                return true;
+                port = 0;
+                if(codeShaped) { error = codeError; return false; }
+            } else if(codeShaped || text.IndexOf(' ') >= 0) {
+                string codeError;
+                JoinCodes.TryDecode(candidate, out address, out port, out codeError);
+                port = 0;
+                error = codeError;
+                return false;
             }
 
-            IPAddress address;
-            if(!JoinCodes.TryDecode(text, out address, out port, out error)) return false;
-            if(port > MaxPort) { error = "This code is for port " + port + "; AMP ports go up to " + MaxPort + "."; port = 0; return false; }
-            host = address.ToString();
+            int colon = text.LastIndexOf(':');
+            if(colon >= 0) {
+                portText = text.Substring(colon + 1);
+                text = text.Substring(0, colon).Trim();
+            }
+            if(text.EndsWith(".")) text = text.Substring(0, text.Length - 1); // "host.example." is the same host
+            if(!HostName.IsMatch(text)) { error = "\"" + text + "\" isn't a join code or an address."; return false; }
+            if(!TryPort(portText, out port)) { error = "The port must be a number from 1 to " + MaxPort + "."; return false; }
+            host = text;
             return true;
         }
 
@@ -148,11 +172,12 @@ namespace AMP.Network.Nat {
 
     public static class NatRules {
         // Shared: private (10/8, 172.16/12, 192.168/16) or carrier-grade NAT (100.64/10): the router's "internet" address is not
-        // reachable from the internet. None: the router has no internet address.
+        // reachable from the internet. None: no usable internet address (missing, 0/8, loopback 127/8, link-local 169.254/16,
+        // benchmark 198.18/15, multicast/reserved 224+).
         public static AddressClass Classify(IPAddress address) {
             if(address == null || address.AddressFamily != AddressFamily.InterNetwork) return AddressClass.None;
             byte[] b = address.GetAddressBytes();
-            if(b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 0) return AddressClass.None;
+            if(b[0] == 0 || b[0] == 127 || b[0] >= 224 || (b[0] == 169 && b[1] == 254) || (b[0] == 198 && (b[1] == 18 || b[1] == 19))) return AddressClass.None;
             if(b[0] == 10) return AddressClass.Shared;
             if(b[0] == 172 && b[1] >= 16 && b[1] <= 31) return AddressClass.Shared;
             if(b[0] == 192 && b[1] == 168) return AddressClass.Shared;

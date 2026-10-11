@@ -322,7 +322,8 @@ namespace AMP {
             serverInstance = new Server();
 
             server.OnStart += (ms) => {
-                Network.Nat.HostPortMapping.Start(port); // in the background; hosting never waits for the router
+                // In the background; hosting never waits for the router, and a problem there never fails hosting
+                try { Network.Nat.HostPortMapping.Start(port); } catch(Exception e) { Log.Err(Defines.SERVER, "UPnP: " + e); }
                 callback(null);
             };
             server.OnStartupError += (error) => {

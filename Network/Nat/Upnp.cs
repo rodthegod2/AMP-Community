@@ -212,7 +212,7 @@ namespace AMP.Network.Nat {
         public readonly int Code;
         public UpnpException(int code, string message) : base(message) { Code = code; }
 
-        public const int NoSuchEntry = 714, Conflict = 718, OnlyPermanentLeases = 725, NotAuthorized = 606;
+        public const int InvalidArgs = 402, NoSuchEntry = 714, Conflict = 718, OnlyPermanentLeases = 725, NotAuthorized = 606;
     }
 
     public class PortMappingEntry {
@@ -269,6 +269,7 @@ namespace AMP.Network.Nat {
             var request = (HttpWebRequest) WebRequest.Create(Service.ControlUrl);
             request.Method = "POST";
             request.Proxy = null;
+            request.AllowAutoRedirect = false; // the router must answer itself
             request.KeepAlive = false;
             request.ServicePoint.Expect100Continue = false;
             request.Timeout = request.ReadWriteTimeout = TimeoutMs;
@@ -299,6 +300,7 @@ namespace AMP.Network.Nat {
         public static string Get(Uri url, int timeoutMs) {
             var request = (HttpWebRequest) WebRequest.Create(url);
             request.Proxy = null;
+            request.AllowAutoRedirect = false; // the router must answer itself
             request.KeepAlive = false;
             request.Timeout = request.ReadWriteTimeout = timeoutMs;
             using(var response = (HttpWebResponse) request.GetResponse()) return ReadBody(response, 256 * 1024);
@@ -331,11 +333,31 @@ namespace AMP.Network.Nat {
             }
         }
 
-        // This PC's address in the home network: the one used for the internet, else the first one with a gateway
+        // This PC's address in the home network: an IPv4 address of a physical adapter that is up and has a gateway (not a VPN,
+        // tunnel or virtual switch), else the one used to reach the internet, else any. Blocking (adapter list): call it off the main thread.
         public static IPAddress Lan() {
+            try {
+                foreach(NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces()) {
+                    if(ni.OperationalStatus != OperationalStatus.Up || IsVirtual(ni)) continue;
+                    IPInterfaceProperties props = ni.GetIPProperties();
+                    if(!props.GatewayAddresses.Any(g => g.Address.AddressFamily == AddressFamily.InterNetwork && !g.Address.Equals(IPAddress.Any))) continue;
+                    UnicastIPAddressInformation ua = props.UnicastAddresses.FirstOrDefault(u => u.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(u.Address));
+                    if(ua != null) return ua.Address;
+                }
+            } catch(Exception) { /* adapter list not supported here */ }
             IPAddress address = Towards(IPAddress.Parse("8.8.8.8"));
             if(address != null && !IPAddress.IsLoopback(address) && !address.Equals(IPAddress.Any)) return address;
             return WithGateway().FirstOrDefault(a => !a.Equals(IPAddress.Any));
+        }
+
+        private static readonly string[] VirtualNames = { "virtual", "vpn", "hyper-v", "vethernet", "vmware", "virtualbox", "tap-", "tap ", "wireguard", "tailscale", "zerotier", "hamachi", "wsl", "docker", "loopback", "pseudo" };
+
+        public static bool IsVirtual(NetworkInterface ni) {
+            switch(ni.NetworkInterfaceType) {
+                case NetworkInterfaceType.Loopback: case NetworkInterfaceType.Tunnel: case NetworkInterfaceType.Ppp: return true;
+            }
+            string name = (ni.Name + " " + ni.Description).ToLowerInvariant();
+            return VirtualNames.Any(v => name.Contains(v));
         }
 
         // IPv4 addresses of interfaces that are up and have a gateway (skips virtual switches of VMs/WSL); all IPv4 ones if none has one

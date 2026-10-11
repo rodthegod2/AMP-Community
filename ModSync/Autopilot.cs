@@ -208,6 +208,7 @@ namespace AMP.ModSync {
             Debug.Log(Prefix + "INFO port mapping " + status.State + (status.Detail.Length > 0 ? " (" + status.Detail + ")" : "") + ", router '" + status.Router + "', lease " + status.LeaseSeconds
                       + ", internet code " + (status.InternetCode ?? "none") + ", lan code " + (Network.Nat.HostPortMapping.LanCode ?? "none") + " | " + string.Join(" | ", status.Describe().ToArray()));
             if(status.State.ToString() != step.Str("state")) failure = "port mapping is " + status.State + ", expected " + step.Str("state");
+            else if(step.Str("internetCode", null) != null && status.InternetCode != step.Str("internetCode")) failure = "internet code is " + (status.InternetCode ?? "none") + ", expected " + step.Str("internetCode");
         }
 
         private static IEnumerator WriteJoinCode(AutopilotStep step) {
