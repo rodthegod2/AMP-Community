@@ -208,7 +208,10 @@ namespace AMP.Network.Client.NetworkComponents {
         #endregion
         
         #region Events
+        internal bool breakingFromNetwork; // ItemBreakPacket is breaking it: not our break to report
+
         internal void OnBreak(Breakable breakable, PhysicBody[] pieces) {
+            if(breakingFromNetwork) return;
             if(!IsSending()) new ItemOwnerPacket(itemNetworkData.networkedId, true).SendToServerReliable();
             
             Vector3[] velocities = new Vector3[breakable.subBrokenBodies.Count];

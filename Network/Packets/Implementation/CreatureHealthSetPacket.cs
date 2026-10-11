@@ -42,7 +42,8 @@ namespace AMP.Network.Packets.Implementation {
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             if(ModManager.serverInstance.creatures.ContainsKey(creatureId)) {
                 CreatureNetworkData cnd = ModManager.serverInstance.creatures[creatureId];
-                
+                if(float.IsNaN(health)) return true; // audit 11
+
                 cnd.Apply(this);
                 
                 ServerEvents.InvokeOnCreatureKilled(cnd, client);

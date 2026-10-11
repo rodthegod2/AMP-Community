@@ -38,6 +38,10 @@ namespace AMP.Network.Packets.Implementation {
             if(ModManager.serverInstance.creatures.ContainsKey(creatureId)) {
                 CreatureNetworkData cnd = ModManager.serverInstance.creatures[creatureId];
 
+                // One NaN made the NPC's health NaN everywhere: never "killed", never healed (audit 11). A change can't exceed the NPC's health.
+                if(float.IsNaN(change) || float.IsInfinity(change)) return true;
+                if(cnd.maxHealth > 0 && !float.IsInfinity(cnd.maxHealth)) change = UnityEngine.Mathf.Clamp(change, -cnd.maxHealth, cnd.maxHealth);
+
                 if(change < 0) {
                     cnd.lastDamager = client;
                     ServerEvents.InvokeOnCreatureDamaged(cnd, change, client);

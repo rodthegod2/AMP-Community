@@ -103,10 +103,10 @@ namespace AMP.Network.Packets.Implementation {
 
                     estimatedPlayerPos = NetworkData.Compensate(estimatedPlayerPos, velocity, compensationFactor);
                     estimatedPlayerRot = NetworkData.Compensate(estimatedPlayerRot, rotationYVel * Mathf.Rad2Deg, compensationFactor);
-                    for(int i = 0; i < estimatedRagdollPos.Length; i++) {
+                    for(int i = 0; i < estimatedRagdollPos.Length && velocities != null && i < velocities.Length; i++) { // a peer's arrays may differ in length (audit 11)
                         estimatedRagdollPos[i] = NetworkData.Compensate(estimatedRagdollPos[i], velocities[i], compensationFactor);
                     }
-                    for(int i = 0; i < estimatedRagdollRotation.Length; i++) {
+                    for(int i = 0; i < estimatedRagdollRotation.Length && angularVelocities != null && i < angularVelocities.Length; i++) {
                         estimatedRagdollRotation[i] = NetworkData.Compensate(estimatedRagdollRotation[i], angularVelocities[i], compensationFactor);
                     }
 

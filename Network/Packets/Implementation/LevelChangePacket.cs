@@ -29,9 +29,9 @@ namespace AMP.Network.Packets.Implementation {
 
                 if(options == null) return result;
 
-                int i = 0;
-                while(i < options.Length) {
-                    result.Add(options[i++], options[i++]);
+                // key, value pairs; an odd last entry or a repeated key from a peer must not throw (audit 11)
+                for(int i = 0; i + 1 < options.Length; i += 2) {
+                    if(options[i] != null) result[options[i]] = options[i + 1];
                 }
 
                 return result;
@@ -69,23 +69,24 @@ namespace AMP.Network.Packets.Implementation {
             ModManager.clientSync.syncData.servermode = mode;
             ModManager.clientSync.syncData.serveroptions = option_dict;
 
-            string currentLevel = "";
-            string currentMode = "";
-            Dictionary<string, string> currentOptions = new Dictionary<string, string>();
-            LevelInfo.ReadLevelInfo(out currentLevel, out currentMode, out currentOptions);
+            Dictionary<string, string> serverOptions = option_dict;
+            // The current level is read on the main thread: a load may be changing it (audit 12)
+            Dispatcher.Enqueue(() => {
+                if(ModManager.clientSync == null) return;
+                string currentLevel = "";
+                string currentMode = "";
+                Dictionary<string, string> currentOptions = new Dictionary<string, string>();
+                LevelInfo.ReadLevelInfo(out currentLevel, out currentMode, out currentOptions);
 
-            if(    ! currentLevel.Equals(ModManager.clientSync.syncData.serverlevel, StringComparison.OrdinalIgnoreCase)
-                || ! LevelInfo.SameOptions(currentOptions, option_dict)
-                ) {
-                Dispatcher.Enqueue(() => {
+                if(    ! (currentLevel ?? "").Equals(ModManager.clientSync.syncData.serverlevel, StringComparison.OrdinalIgnoreCase)
+                    || ! LevelInfo.SameOptions(currentOptions, serverOptions)
+                    ) {
                     TextDisplay.ClearText();
                     LevelInfo.TryLoadLevel(ModManager.clientSync.syncData.serverlevel, ModManager.clientSync.syncData.servermode, ModManager.clientSync.syncData.serveroptions);
-                });
-            } else {
-                Dispatcher.Enqueue(() => {
+                } else {
                     this.SendToServerReliable();
-                });
-            }
+                }
+            });
             return true;
         }
 

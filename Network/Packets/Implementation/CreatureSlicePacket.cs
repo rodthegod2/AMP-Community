@@ -44,20 +44,21 @@ namespace AMP.Network.Packets.Implementation {
 
                 RagdollPart.Type ragdollPartType = (RagdollPart.Type) slicedPart;
 
-                if(cnd.creature.ragdoll != null) {
+                // Main thread: the NPC may not be spawned here (outside the active area), that was a NullReferenceException on the
+                // network thread for every slice (audit 12)
+                Dispatcher.Enqueue(() => {
+                    if(cnd.creature == null || cnd.creature.ragdoll == null) return;
                     RagdollPart rp = cnd.creature.ragdoll.GetPart(ragdollPartType, (RagdollPart.Section) section);
                     if(rp == null) {
                         rp = cnd.creature.ragdoll.GetPart(ragdollPartType);
                     }
 
                     if(rp != null) {
-                        Dispatcher.Enqueue(() => {
-                            cnd.creature.ragdoll.TrySlice(rp);
-                        });
+                        cnd.creature.ragdoll.TrySlice(rp);
                     } else {
                         Log.Err(Defines.CLIENT, $"Couldn't slice off {ragdollPartType} from {creatureId}.");
                     }
-                }
+                });
             }
             return true;
         }

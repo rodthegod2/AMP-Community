@@ -32,10 +32,17 @@ namespace AMP.Network.Packets.Implementation {
                 Dispatcher.Enqueue(() => {
                 Breakable breakable = itemNetworkData?.clientsideItem?.GetComponent<Breakable>();
                     if(breakable != null) {
-                        breakable.Break();
+                        // Breaking raises the game's break event; without this every receiver claimed the item and sent the break again (audit 9)
+                        Client.NetworkComponents.NetworkItem ni = itemNetworkData.networkItem;
+                        if(ni != null) ni.breakingFromNetwork = true;
+                        try {
+                            breakable.Break();
+                        } finally {
+                            if(ni != null) ni.breakingFromNetwork = false;
+                        }
 
                         for(int i = 0; i < breakable.subBrokenBodies.Count; i++) {
-                            if(breakable.subBrokenBodies.Count <= i) break;
+                            if(velocities == null || angularVelocities == null || i >= velocities.Length || i >= angularVelocities.Length) break;
                             PhysicBody pb = breakable.subBrokenBodies[i];
                             pb.velocity = velocities[i];
                             pb.angularVelocity = angularVelocities[i];
