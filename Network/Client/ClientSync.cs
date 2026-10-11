@@ -581,8 +581,8 @@ namespace AMP.Network.Client {
                         foreach(Item item in holder.items.ToList()) if(item != null) holder.UnSnap(item, true);
                     }
                 }
-                if(puppet.handLeft != null) puppet.handLeft.UnGrab(false);
-                if(puppet.handRight != null) puppet.handRight.UnGrab(false);
+                if(puppet.handLeft != null && puppet.handLeft.grabbedHandle != null) puppet.handLeft.UnGrab(false);
+                if(puppet.handRight != null && puppet.handRight.grabbedHandle != null) puppet.handRight.UnGrab(false);
             } catch(Exception e) {
                 Log.Warn(Defines.CLIENT, "Couldn't release the items of a leaving player: " + e.Message);
             }
