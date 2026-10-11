@@ -281,7 +281,8 @@ $Scenarios = [ordered]@{
         # host's version, the rest from the host), swaps Temporary, restarts, rejoins with everything; after quitting Mods is the staged set again
         Extended = $true; TimeoutMin = 90; Purge = $true; WaitRestore = $true; CachedFolder = "Kashimo's Technique"
         GameMods = @(); BotMods = @($Real); BotMode = 'host'
-        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
+        # The bot hashes its 2 GB before it listens (about 17 s): the game waits a bit before joining
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'wait'; seconds = 40 }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
                      @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 3600 }, @{ step = 'expectRejoined'; timeout = 900 },
                      @{ step = 'expectModFolder'; folder = "Kashimo's Technique"; present = $true }, @{ step = 'expectModFolder'; folder = 'WaterSpell'; present = $true },
                      @{ step = 'expectModFolder'; folder = 'AT_Destiny Megapack'; present = $true }, @{ step = 'expectProfileActive'; active = $true }, @{ step = 'wait'; seconds = 30 }, @{ step = 'quit' })
@@ -745,7 +746,7 @@ function Invoke-Scenario([string]$Name) {
         $events | ForEach-Object { Note "  $_" }
         # Copies of the real mods are large: once the run is over only the logs stay (they are copies, the real Mods are back in place)
         $runBytes = (Get-ChildItem -LiteralPath $run -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-        if ($s.Purge -and $runBytes -gt 2GB) {
+        if ($s.Purge -and $runBytes -gt 1GB) {
             foreach ($big in 'bot-mods', 'bot-cache', 'mods-after', 'AMP_ModCache', 'docs\modio') {
                 $p = Join-Path $run $big
                 if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
