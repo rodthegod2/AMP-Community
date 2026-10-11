@@ -246,12 +246,21 @@ namespace AMP.Network.Server {
             }
         }
 
-        public void UpdateItemOwner(ItemNetworkData itemNetworkData, ClientData newOwner) {
-            item_owner.TryGetValue(itemNetworkData.networkedId, out int oldOwnerId);
-            item_owner[itemNetworkData.networkedId] = newOwner.ClientId;
+        // Each client's packets arrive on its own network thread: two players grabbing or hitting the same thing at once ran these at the
+        // same time, and the "you own it" / "you don't" packets could interleave so that the server's owner and the clients' ideas of it
+        // disagreed (frozen items, NPCs simulated twice; audit finding 6). The owner write and its two sends happen under this lock.
+        // Sends only enqueue into the sockets' queues, so it is held briefly.
+        private readonly object ownerLock = new object();
 
-            netamiteServer.SendTo(newOwner, new ItemOwnerPacket(itemNetworkData.networkedId, true));
-            netamiteServer.SendToPlayingExcept(new ItemOwnerPacket(itemNetworkData.networkedId, false), newOwner.ClientId);
+        public void UpdateItemOwner(ItemNetworkData itemNetworkData, ClientData newOwner) {
+            int oldOwnerId;
+            lock(ownerLock) {
+                item_owner.TryGetValue(itemNetworkData.networkedId, out oldOwnerId);
+                item_owner[itemNetworkData.networkedId] = newOwner.ClientId;
+
+                netamiteServer.SendTo(newOwner, new ItemOwnerPacket(itemNetworkData.networkedId, true));
+                netamiteServer.SendToPlayingExcept(new ItemOwnerPacket(itemNetworkData.networkedId, false), newOwner.ClientId);
+            }
 
             if(oldOwnerId != newOwner.ClientId) {
                 if(oldOwnerId > 0)
@@ -282,22 +291,25 @@ namespace AMP.Network.Server {
         }
 
         public void UpdateCreatureOwner(CreatureNetworkData creatureNetworkData, ClientData newOwner, bool staticOwner = false) {
-            creature_owner.TryGetValue(creatureNetworkData.networkedId, out int oldOwnerId);
+            int oldOwnerId;
+            lock(ownerLock) {
+                creature_owner.TryGetValue(creatureNetworkData.networkedId, out oldOwnerId);
 
-            if(!IsCreatureOwnerChangeAllowed(creatureNetworkData, newOwner, oldOwnerId, staticOwner)) {
-                // The requester assumes ownership right away, so tell it that it was refused
-                netamiteServer.SendTo(newOwner, new CreatureOwnerPacket(creatureNetworkData.networkedId, false, creatureNetworkData.staticOwner));
-                return;
-            }
+                if(!IsCreatureOwnerChangeAllowed(creatureNetworkData, newOwner, oldOwnerId, staticOwner)) {
+                    // The requester assumes ownership right away, so tell it that it was refused
+                    netamiteServer.SendTo(newOwner, new CreatureOwnerPacket(creatureNetworkData.networkedId, false, creatureNetworkData.staticOwner));
+                    return;
+                }
 
-            if(oldOwnerId > 0 && oldOwnerId != newOwner.ClientId) creature_owner_changed[creatureNetworkData.networkedId] = Stopwatch.GetTimestamp();
+                if(oldOwnerId > 0 && oldOwnerId != newOwner.ClientId) creature_owner_changed[creatureNetworkData.networkedId] = Stopwatch.GetTimestamp();
 
-            creature_owner[creatureNetworkData.networkedId] = newOwner.ClientId;
+                creature_owner[creatureNetworkData.networkedId] = newOwner.ClientId;
             
-            creatureNetworkData.staticOwner = staticOwner;
+                creatureNetworkData.staticOwner = staticOwner;
 
-            netamiteServer.SendTo(newOwner, new CreatureOwnerPacket(creatureNetworkData.networkedId, true, staticOwner));
-            netamiteServer.SendToPlayingExcept(new CreatureOwnerPacket(creatureNetworkData.networkedId, false, staticOwner), newOwner.ClientId);
+                netamiteServer.SendTo(newOwner, new CreatureOwnerPacket(creatureNetworkData.networkedId, true, staticOwner));
+                netamiteServer.SendToPlayingExcept(new CreatureOwnerPacket(creatureNetworkData.networkedId, false, staticOwner), newOwner.ClientId);
+            }
 
             List<ItemNetworkData> holdingItems = items.Values.Where(ind => ind.holdingStates != null && ind.holdingStates.Where(state => state.holderNetworkId == creatureNetworkData.networkedId).Count() > 0).ToList();
             foreach(ItemNetworkData item in holdingItems) {
@@ -364,6 +376,7 @@ namespace AMP.Network.Server {
                         Log.Err(Defines.SERVER, $"Couldn't migrate items from {client.ClientName} to { migrateUser.ClientName}.\n{e}");
                     }
 
+                    lock(ownerLock)
                     try {
                         KeyValuePair<int, int>[] entries = creature_owner.Where(entry => entry.Value == client.ClientId).ToArray();
 
