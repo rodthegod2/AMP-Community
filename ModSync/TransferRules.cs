@@ -66,6 +66,12 @@ namespace AMP.ModSync {
             }
         }
 
+        // The host's setup time limit doesn't end a joiner's download that is still moving: lastProgress is when the joiner last
+        // acknowledged a chunk (or asked for the next mod) of its running download from the host, null when none is running
+        public static bool DownloadStillMoving(DateTime now, DateTime? lastProgress, TimeSpan stall) {
+            return lastProgress.HasValue && now - lastProgress.Value < stall;
+        }
+
         public static List<TransferFile> ListTransferFiles(string folder) {
             return Directory.GetFiles(folder, "*", SearchOption.AllDirectories)
                             .Select(f => new { full = f, rel = ModInventory.RelativePath(folder, f) })

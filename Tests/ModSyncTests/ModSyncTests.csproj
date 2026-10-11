@@ -33,6 +33,7 @@
     <Compile Include="..\..\ModSync\ModioRules.cs" />
     <Compile Include="..\..\ModSync\ModMatcher.cs" />
     <Compile Include="NatTests.cs" />
+    <Compile Include="OvernightTests.cs" />
     <Compile Include="FakeIgd.cs" />
     <Compile Include="..\..\Network\Nat\JoinCodes.cs" />
     <Compile Include="..\..\Network\Nat\Upnp.cs" />

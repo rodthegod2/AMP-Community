@@ -26,6 +26,9 @@ namespace AMP.ModSync {
             public volatile int transferId;
             public volatile TransferSender sender;
             public readonly SemaphoreSlim readyNext = new SemaphoreSlim(0); // released when the joiner has verified a mod
+            public long lastProgressTicks = DateTime.UtcNow.Ticks;          // the joiner's last ack or READY_NEXT (UTC ticks)
+
+            public void Progressed() { Interlocked.Exchange(ref lastProgressTicks, DateTime.UtcNow.Ticks); }
 
             public void Cancel() {
                 cancelled = true;
@@ -50,12 +53,16 @@ namespace AMP.ModSync {
                     if(uploads.TryGetValue(client.ClientId, out upload) && upload.transferId == packet.transferId) {
                         TransferSender sender = upload.sender;
                         if(sender != null) sender.Ack();
+                        upload.Progressed();
                     }
                     break;
                 }
                 case ModSyncPacket.READY_NEXT: {
                     ActiveUpload upload;
-                    if(uploads.TryGetValue(client.ClientId, out upload) && upload.transferId == packet.transferId) upload.readyNext.Release();
+                    if(uploads.TryGetValue(client.ClientId, out upload) && upload.transferId == packet.transferId) {
+                        upload.Progressed();
+                        upload.readyNext.Release();
+                    }
                     break;
                 }
                 case ModSyncPacket.TRANSFER_CANCEL: {
@@ -64,6 +71,13 @@ namespace AMP.ModSync {
                     break;
                 }
             }
+        }
+
+        // When the joiner's running download last moved; null when it has none (ModSyncHost's setup time limit)
+        internal static DateTime? LastProgress(ClientData client) {
+            ActiveUpload upload;
+            if(!uploads.TryGetValue(client.ClientId, out upload) || upload.cancelled) return null;
+            return new DateTime(Interlocked.Read(ref upload.lastProgressTicks), DateTimeKind.Utc);
         }
 
         internal static void OnClientDisconnected(ClientData client) {

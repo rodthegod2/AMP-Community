@@ -17,6 +17,10 @@ namespace AMP.ModSync {
     internal static class ModSyncHost {
         private const int REPORT_TIMEOUT_MS = 60 * 1000;      // a joiner without mod sync never answers
         private const int SETUP_TIMEOUT_MS  = 30 * 60 * 1000; // time a joiner gets to look at / set up mods
+        private const int SETUP_STALL_MS    = 2 * 60 * 1000;  // ...longer while its download from this host still moves (acknowledged within this)
+        private const int SETUP_RECHECK_MS  = 60 * 1000;      // how often a moving download's joiner is checked again after that
+        internal const string TestSetupTimeoutFlag = "-amp-test-setup-timeout"; // seconds; honoured only in isolated test runs
+        private static int setupTimeoutMs = SETUP_TIMEOUT_MS;
         private const int CHECK_TIMEOUT_MS  = 15 * 60 * 1000; // time a joiner gets to scan its mods
         internal const int MAX_REPORT_PARTS = 10;             // a joiner's report is tiny, anything longer is not one
         private const int MATCH_WAIT_MS     = 30 * 1000;      // how long a Quest joiner's updated mod list waits for the Quest matching of a new hosting session
@@ -53,6 +57,7 @@ namespace AMP.ModSync {
             HostMods       = null;
             HostModsFolder = null;
             mode = NormalizeMode(ModManager.safeFile.hostingSettings.modSyncMode);
+            setupTimeoutMs = TestSetupTimeoutMs() ?? SETUP_TIMEOUT_MS;
             if(mode != ModSyncMode.Off && !ModSyncPaths.Available) {
                 Log.Warn(Defines.SERVER, "Mod sync is unavailable (Mods folder not found), hosting without it.");
                 mode = ModSyncMode.Off;
@@ -70,6 +75,7 @@ namespace AMP.ModSync {
             bool matchQuest = ModSyncPaths.Platform == "windows";
             int matchGeneration = matchQuest ? QuestMatcher.Begin() : 0;
             hostModSet = Task.Run(() => {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
                 List<ModEntry> mods = ModInventory.Scan(modsFolder, cacheFolder, true);
                 set.mods      = mods.Where(m => m.enabled).ToList();
                 if(generation == prepareGeneration) { // a scan of an earlier hosting session must not overwrite this one's list
@@ -81,7 +87,7 @@ namespace AMP.ModSync {
                 set.loadOrder = ModInventory.ReadLoadOrder(modsFolder);
                 ModEntry amp  = mods.FirstOrDefault(m => m.isAmp && m.enabled);
                 set.ampBuild  = amp != null ? amp.hash : "";
-                Log.Info(Defines.SERVER, $"Mod sync ({set.mode}): hosting with {set.mods.Count} mods.");
+                Log.Info(Defines.SERVER, $"Mod sync ({set.mode}): hosting with {set.mods.Count} mods ({set.mods.Sum(m => m.sizeBytes) / (1024 * 1024)} MB, checked in {clock.Elapsed.TotalSeconds:0.0} s).");
                 return set;
             });
         }
@@ -193,11 +199,28 @@ namespace AMP.ModSync {
             } else if(report.status == JoinerStatus.NeedsSetup) {
                 if(!Transition(client, SETUP, WAITING, CHECKING)) return;
                 Log.Info(Defines.SERVER, $"Mod sync: {client.ClientName} ({report.platform}) needs to set up mods:\n{report.detail}");
-                Task.Delay(SETUP_TIMEOUT_MS).ContinueWith(_ => {
-                    if(IsConnected(server, client) && Transition(client, KICKED, SETUP)) client.Kick("Mod setup took too long.");
-                });
+                Task.Delay(setupTimeoutMs).ContinueWith(_ => OnSetupTimeout(server, client));
             }
             // Declined: the joiner disconnects by itself
+        }
+
+        // A big mod set over a slow upload can take longer than the setup time: a joiner whose download from this host still moves stays
+        private static void OnSetupTimeout(ServerType server, ClientData client) {
+            if(!IsConnected(server, client)) return;
+            if(TransferRules.DownloadStillMoving(DateTime.UtcNow, ModTransferHost.LastProgress(client), TimeSpan.FromMilliseconds(SETUP_STALL_MS))) {
+                if(IsSettingUp(client)) Task.Delay(SETUP_RECHECK_MS).ContinueWith(_ => OnSetupTimeout(server, client));
+                return;
+            }
+            if(Transition(client, KICKED, SETUP)) client.Kick("Mod setup took too long.");
+        }
+
+        private static int? TestSetupTimeoutMs() {
+            if(AppDomain.CurrentDomain.GetData("AMP_TEST_ISOLATED") == null) return null;
+            string value = AutopilotScript.FindArg(Environment.GetCommandLineArgs(), TestSetupTimeoutFlag);
+            int seconds;
+            if(value == null || !int.TryParse(value, out seconds) || seconds < 1) return null;
+            Log.Info(Defines.SERVER, "Mod sync: test run, joiners get " + seconds + " s to set up their mods.");
+            return seconds * 1000;
         }
 
         private static void OnReportTimeout(ServerType server, ClientData client, string connectMode) {

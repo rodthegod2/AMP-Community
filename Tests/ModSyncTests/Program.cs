@@ -37,6 +37,7 @@ internal static partial class Program {
         QuestFlowTests();
         ReviewFixTests();
         NatTests();
+        OvernightTests();
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         return fails;
     }
