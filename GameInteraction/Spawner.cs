@@ -32,6 +32,8 @@ namespace AMP.GameInteraction {
                 Vector3 position = pnd.position;
                 float rotationY = pnd.rotationY;
 
+                // A copy: the catalog's CreatureData is shared, an empty container there stripped the gear of every later local spawn (audit 13)
+                creatureData = (CreatureData) creatureData.Clone();
                 creatureData.containerID = "Empty";
 
                 ModManager.clientSync.StartCoroutine(creatureData.SpawnCoroutine(position, rotationY, ModManager.instance.transform, pooled: false, callback: (creature) => {
@@ -156,6 +158,7 @@ namespace AMP.GameInteraction {
                 Vector3 position = creatureSync.position;
                 float rotationY = creatureSync.rotationY;
 
+                creatureData = (CreatureData) creatureData.Clone(); // the catalog's instance is shared (audit 13)
                 creatureData.containerID = "Empty";
 
                 ModManager.clientSync.StartCoroutine(creatureData.SpawnCoroutine(position, rotationY, ModManager.instance.transform, callback: (creature) => {
@@ -173,7 +176,9 @@ namespace AMP.GameInteraction {
                     creature.SetFaction(creatureSync.factionId);
 
                     creature.maxHealth = creatureSync.maxHealth;
-                    creature.currentHealth = creatureSync.maxHealth;
+                    // The NPC's current health, not full: a joiner (or a dungeon player spawning it on approach) saw a damaged NPC at full
+                    // health, and its first hits never counted (NetworkCreature reports currentHealth - synced health, audit 5)
+                    creature.currentHealth = creatureSync.health > 0 ? Mathf.Min(creatureSync.health, creatureSync.maxHealth) : creatureSync.maxHealth;
 
                     CreatureEquipment.Apply(creature, creatureSync.colors, creatureSync.equipment, creatureSync.ethnicGroup);
 
@@ -236,7 +241,7 @@ namespace AMP.GameInteraction {
             }
 
             if(itemData != null && itemData.prefabLocation != null) {
-                List<Item> unsynced_items = Item.allActive.Where(item => ModManager.clientSync.syncData.items.All(entry => !item.Equals(entry.Value.clientsideItem))).ToList();
+                // (an unused Item.allActive x synced items scan ran here for every item spawn, audit 7)
                 /*
                 if(despawn_close_by) {
                     foreach(Item item in unsynced_items) {
