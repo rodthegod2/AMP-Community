@@ -67,7 +67,7 @@ A community fork of AMP (Adammantium Multiplayer Mod) for Blade & Sorcery.
 - **In-game updater**: AMP checks this releases page at startup; press "Update AMP" in the book when a newer version exists
 - **mod.io delivery** (1.1.0): mods the host got from mod.io come straight from mod.io when it still has the host's version
 - **Quest (experimental, 1.1.0)**: a PC host looks up Quest versions of its mods on mod.io (Nexus mods by name, asking the host when unsure); Quest players download those from mod.io, install them in-game and restart (see HOW-TO-PLAY.txt, section 8)
-- **Join codes + automatic port opening**: "Host on PC" now opens its port on your router by itself by default (UPnP; removed again when you stop hosting) and shows a short code like `K7QX-29MB` that friends (PC or Quest) type into "Join Code / IP". Turn it off with `"autoPortForward": false` in config.json (`hostingSettings`). When hosting over the internet, set a password (`host_password` in config.json): anyone with your code or IP can try to join.
+- **Join codes + automatic port opening** (1.2.0): "Host on PC" now opens its port on your router by itself by default (UPnP; removed again when you stop hosting) and shows a short code like `K7QX-29MB` that friends (PC or Quest) type into "Join Code / IP". Turn it off with `"autoPortForward": false` in config.json (`hostingSettings`). When hosting over the internet, set a password (`host_password` in config.json): anyone with your code or IP can try to join.
 
 ## Install
 1. Download `@ZIP@` below (check it against `SHA256SUMS.txt` if you like).
@@ -78,6 +78,8 @@ A community fork of AMP (Adammantium Multiplayer Mod) for Blade & Sorcery.
 - Not yet tested in VR by the maintainers.
 - Quest support is experimental and not yet tested on a headset (install path and in-game swap unverified there).
 - Mod sync and settings sync require the host to run this build with "Host on PC".
+- Automatic port opening needs UPnP on your router; it can't work when your internet provider (or a second router in front of yours) shares your IP. Then the Internet code isn't shown: forward the port by hand or join on the same Wi-Fi.
+- Players still on 1.0.0 re-download mod.io mods that have a `modio-thumbnail.png` once, until they take the offered AMP update.
 
 ## Credits
 - **AMP** by Adammantium, Apache-2.0: https://github.com/AdammantiumMultiplayer/AMP
