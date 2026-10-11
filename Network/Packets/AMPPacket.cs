@@ -14,8 +14,12 @@ namespace AMP.Network.Packets {
         /// <returns></returns>
         public virtual bool ProcessServer(NetamiteServer server, ClientData client) { return false; }
 
+        // False when a position/rotation/velocity is NaN or infinite: the server drops the packet instead of applying and relaying it.
+        // Overridden by the movement and spawn packets (PacketChecks), the others carry nothing that ends up in a transform.
+        internal virtual bool HasValidNumbers() { return true; }
+
         public override bool ProcessServer(NetamiteServer server, ClientInformation client) {
-            if(!PacketNumbers.AllFinite(this)) {
+            if(!HasValidNumbers()) {
                 // Handled (dropped): never relayed to the other players
                 if(warned.TryAdd(GetType().Name + ":" + client.ClientId, true)) AMP.Logging.Log.Warn(AMP.Data.Defines.SERVER, client.ClientName + " sent a " + GetType().Name + " with invalid numbers (NaN/infinite), ignoring those.");
                 return true;

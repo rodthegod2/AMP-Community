@@ -87,6 +87,13 @@ namespace AMP.Network.Packets.Implementation {
             return true;
         }
 
+        internal override bool HasValidNumbers() {
+
+            return PacketChecks.Ok(playerPos) && PacketChecks.Ok(playerRotY) && PacketChecks.Ok(height);
+
+        }
+
+
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             name = Regex.Replace(client.ClientName, @"[^\u0000-\u007F]+", string.Empty);
             client.player.Apply(this);

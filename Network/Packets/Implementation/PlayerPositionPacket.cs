@@ -76,6 +76,13 @@ namespace AMP.Network.Packets.Implementation {
             return true;
         }
 
+        internal override bool HasValidNumbers() {
+
+            return PacketChecks.Ok(position) && PacketChecks.Ok(rotationY) && PacketChecks.Ok(headPos) && PacketChecks.Ok(headRot) && PacketChecks.Ok(handLeftPos) && PacketChecks.Ok(handLeftRot) && PacketChecks.Ok(handRightPos) && PacketChecks.Ok(handRightRot);
+
+        }
+
+
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             if(client.player == null) return true;
 

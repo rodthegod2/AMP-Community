@@ -126,6 +126,13 @@ namespace AMP.Network.Packets.Implementation {
             return true;
         }
 
+        internal override bool HasValidNumbers() {
+
+            return PacketChecks.Ok(position) && PacketChecks.Ok(rotationY) && PacketChecks.Ok(velocity) && PacketChecks.Ok(rotationYVel) && PacketChecks.Ok(ragdollPositions) && PacketChecks.Ok(ragdollRotations) && PacketChecks.Ok(velocities) && PacketChecks.Ok(angularVelocities);
+
+        }
+
+
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             if(client.ClientId != playerId) return true;
 

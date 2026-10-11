@@ -65,6 +65,13 @@ namespace AMP.Network.Packets.Implementation {
             return true;
         }
 
+        internal override bool HasValidNumbers() {
+
+            return PacketChecks.Ok(position) && PacketChecks.Ok(rotation) && PacketChecks.Ok(velocity) && PacketChecks.Ok(angularVelocity);
+
+        }
+
+
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             if(ModManager.serverInstance.items.ContainsKey(itemId)) {
                 // Drop late updates from a previous holder, otherwise everyone sees the item jitter between two players

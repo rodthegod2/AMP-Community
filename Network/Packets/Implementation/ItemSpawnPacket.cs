@@ -130,6 +130,13 @@ namespace AMP.Network.Packets.Implementation {
             return true;
         }
 
+        internal override bool HasValidNumbers() {
+
+            return PacketChecks.Ok(position) && PacketChecks.Ok(rotation);
+
+        }
+
+
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             ItemNetworkData ind = new ItemNetworkData();
             ind.Apply(this);

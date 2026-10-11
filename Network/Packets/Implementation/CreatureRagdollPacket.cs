@@ -92,6 +92,13 @@ namespace AMP.Network.Packets.Implementation {
             return true;
         }
 
+        internal override bool HasValidNumbers() {
+
+            return PacketChecks.Ok(position) && PacketChecks.Ok(velocity) && PacketChecks.Ok(ragdollPositions) && PacketChecks.Ok(ragdollRotations) && PacketChecks.Ok(velocities) && PacketChecks.Ok(angularVelocities);
+
+        }
+
+
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
             if(ModManager.serverInstance.creatures.ContainsKey(creatureId)) {
                 if(!ModManager.serverInstance.creature_owner.TryGetValue(creatureId, out int creatureOwnerId) || creatureOwnerId != client.ClientId) return true;

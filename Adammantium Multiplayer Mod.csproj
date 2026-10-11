@@ -223,6 +223,7 @@
     <Compile Include="Network\NetworkStats.cs" />
     <Compile Include="Network\Packets\AMPPacket.cs" />
     <Compile Include="Network\Packets\PacketNumbers.cs" />
+    <Compile Include="Network\Packets\PacketChecks.cs" />
     <Compile Include="Network\Data\ItemCapPolicy.cs" />
     <Compile Include="Network\Data\LevelChangeRules.cs" />
     <Compile Include="GameInteraction\PlayerNotices.cs" />
