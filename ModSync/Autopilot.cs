@@ -465,7 +465,7 @@ namespace AMP.ModSync {
             else if(now.clientsideItem.holder != null) failure = "the item is still in a holder: " + state;
         }
 
-        // Another player's NPC of this type is spawned here with this current health (+-1), and the shared catalog entry of the type still
+        // Another player's NPC of this type is spawned here with this current health (+1/-10), and the shared catalog entry of the type still
         // has its own container (spawning remote NPCs must not change it)
         private static IEnumerator ExpectCreatureHealth(AutopilotStep step) {
             string type = step.Str("type");
@@ -476,7 +476,8 @@ namespace AMP.ModSync {
                     float health = cnd.creature.currentHealth;
                     string container = Catalog.GetData<CreatureData>(type, false)?.containerID;
                     Debug.Log(Prefix + "INFO NPC " + type + " (" + cnd.networkedId + ") spawned with " + health.ToString("0.0") + " of " + cnd.creature.maxHealth.ToString("0.0") + " health; catalog container of " + type + ": " + container);
-                    if(Math.Abs(health - step.Int("health")) > 1f) failure = "the NPC has " + health.ToString("0.0") + " health, expected " + step.Int("health");
+                    // A few points may go right after spawning (it lands): far from full health is what counts
+                    if(health > step.Int("health") + 1f || health < step.Int("health") - 10f) failure = "the NPC has " + health.ToString("0.0") + " health, expected about " + step.Int("health");
                     else if(container == "Empty") failure = "spawning the NPC changed the shared catalog entry of " + type + " (container Empty)";
                     yield break;
                 }
