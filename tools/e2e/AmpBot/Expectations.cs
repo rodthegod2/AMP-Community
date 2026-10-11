@@ -41,6 +41,8 @@ namespace AmpBot {
         public List<string> served = new List<string>();      // folders that must have been sent completely
         public List<string> notServed = new List<string>();   // folders the joiner must not ask for (it gets them from mod.io)
         public int greetings = 1;          // joiners that must have been greeted
+        public int dropAtPercent;          // > 0: the first download is cut off once this share of its bytes was sent ...
+        public string dropHow = "reset";   // ... "reset": the joiner's connection is reset (network loss); "quit": the host stops and hosts again 5 s later
 
         public static Expectations Load(string path) {
             if(path == null) return new Expectations();

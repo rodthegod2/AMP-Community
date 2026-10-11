@@ -23,6 +23,7 @@ public class FakeIgd : IDisposable {
     public bool Silent;              // doesn't answer SSDP at all
     public readonly Dictionary<string, Mapping> Mappings = new Dictionary<string, Mapping>(); // "TCP 26950"
     public readonly List<string> Calls = new List<string>();  // "AddPortMapping TCP 26950 127.0.0.1 7200 AMP Community"
+    public volatile Action<string> Trace;                      // every SOAP call as it arrives (the E2E bot logs them with a time)
 
     public int SsdpPort { get { return ((IPEndPoint) ssdp.Client.LocalEndPoint).Port; } }
     public IPEndPoint SsdpEndpoint { get { return new IPEndPoint(IPAddress.Loopback, SsdpPort); } }
@@ -119,6 +120,8 @@ public class FakeIgd : IDisposable {
         Func<string, string> arg = name => { XmlNode n = doc.SelectSingleNode("//*[local-name()='" + name + "']"); return n == null ? "" : n.InnerText; };
         string key = arg("NewProtocol") + " " + arg("NewExternalPort");
         status = 200;
+        Action<string> trace = Trace;
+        if(trace != null) trace(action + " " + key + (action == "AddPortMapping" ? " lease " + arg("NewLeaseDuration") : ""));
         if(action == "DeletePortMapping" && DeleteDelayMs > 0) Thread.Sleep(DeleteDelayMs);
         lock(Gate) {
             switch(action) {

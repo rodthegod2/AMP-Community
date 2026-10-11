@@ -37,6 +37,7 @@ namespace AMP.ModSync {
         private static DateTime lastProgress;
         private static int requestId;                          // id of our MODS_REQUEST; the host echoes it in every manifest and end message
         private static DateTime lastActivity;
+        private static DateTime started;                       // for the summary in the log
         private static int committing;                         // mods being verified right now: the host is allowed to be quiet then
         private static Timer idleTimer;
 
@@ -84,6 +85,7 @@ namespace AMP.ModSync {
                 finishedBytes = 0;
                 lastProgress  = DateTime.MinValue;
                 lastActivity  = DateTime.UtcNow;
+                started       = DateTime.UtcNow;
                 committing    = 0;
                 receiver      = null;
                 receiving     = null;
@@ -326,6 +328,9 @@ namespace AMP.ModSync {
         // Inside the lock: ends the download and reports it
         private static void Finish(bool ok, string error, bool tellHost) {
             if(!active) return;
+            double seconds = Math.Max(0.001, (DateTime.UtcNow - started).TotalSeconds);
+            long got = finishedBytes + (receiver != null ? receiver.ReceivedBytes : 0);
+            Log.Info(Defines.CLIENT, $"Mod sync: download {(ok ? "finished" : "stopped (" + error + ")")}: {got / (1024 * 1024)} of {totalBytes / (1024 * 1024)} MB in {seconds:0.0} s ({got / seconds / (1024 * 1024):0.00} MB/s).");
             if(tellHost) SendCancel();
             Action<bool, string> callback = done;
             Abandon();

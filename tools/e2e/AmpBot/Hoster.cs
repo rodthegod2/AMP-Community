@@ -219,6 +219,31 @@ namespace AmpBot {
             }
         }
 
+        private int dropped; // 1 once the download was cut off (dropAtPercent)
+
+        // Cuts the joiner off in the middle of its download, off the upload thread
+        private void Drop(ClientInformation c, long sent, long total) {
+            if(Interlocked.Exchange(ref dropped, 1) == 1) return;
+            new Thread(() => {
+                Out.Info("DROP at " + sent + " of " + total + " bytes (" + (sent * 100 / Math.Max(1, total)) + "%), " + x.dropHow);
+                if(x.dropHow == "quit") {
+                    Stop();
+                    Thread.Sleep(5000);
+                    Start();
+                    Out.Info("hosting again after the drop");
+                } else {
+                    // Like a lost network: the TCP connection is reset, no goodbye
+                    var connections = (System.Collections.IDictionary) typeof(IPServer).GetField("tcpConnections", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(server);
+                    object socket = connections[c.ClientId];
+                    var tcp = (System.Net.Sockets.TcpClient) socket.GetType().GetProperty("client").GetValue(socket);
+                    tcp.Client.LingerState = new System.Net.Sockets.LingerOption(true, 0);
+                    tcp.Client.Close(0);
+                    Upload upload; // the server side of a reset doesn't always raise OnDisconnect: the upload stops here
+                    if(uploads.TryRemove(c.ClientId, out upload)) Cancel(upload);
+                }
+            }) { IsBackground = true }.Start();
+        }
+
         private void OnRequest(ClientInformation c, int requestId, ModsRequest request) {
             if(request == null || request.folders == null) return;
             List<ModEntry> mods = request.folders.Distinct().Select(f => hostMods.FirstOrDefault(m => m.folder == f)).Where(m => m != null).ToList();
@@ -231,16 +256,23 @@ namespace AmpBot {
 
         // Same protocol as ModTransferHost.Upload: manifest, chunks with an ack window, end; READY_NEXT before the next mod
         private void Send(ClientInformation c, int requestId, Upload upload, List<ModEntry> mods) {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            long bytes = 0, sent = 0;
+            long total = mods.Sum(m => TransferRules.ListTransferFiles(Path.Combine(modsFolder, m.folder)).Sum(f => f.size));
             try {
                 foreach(ModEntry mod in mods) {
-                    if(upload.cancelled) return;
+                    if(upload.cancelled) { Out.Info("upload to client " + c.ClientId + " cancelled after " + bytes + " bytes, " + clock.Elapsed.TotalSeconds.ToString("0.0") + " s"); return; }
                     string folder = Path.Combine(modsFolder, mod.folder);
                     var manifest = new TransferManifest {
                         requestId = requestId, transferId = Interlocked.Increment(ref nextTransferId),
                         folder = mod.folder, hash = mod.hash, modioId = mod.modioId, files = TransferRules.ListTransferFiles(folder),
                     };
                     var sender = new TransferSender(manifest, folder, Window, 0,
-                        (file, offset, data) => server.SendTo(c, new ModFilePacket(manifest.transferId, file, offset, Convert.ToBase64String(data))));
+                        (file, offset, data) => {
+                            server.SendTo(c, new ModFilePacket(manifest.transferId, file, offset, Convert.ToBase64String(data)));
+                            sent += data.Length;
+                            if(x.dropAtPercent > 0 && sent * 100 >= total * x.dropAtPercent) Drop(c, sent, total);
+                        });
                     upload.transferId = manifest.transferId;
                     upload.sender = sender;
                     foreach(ModSyncPacket packet in ModSyncPacket.Create(ModSyncPacket.TRANSFER_START, JsonConvert.SerializeObject(manifest))) server.SendTo(c, packet);
@@ -249,8 +281,11 @@ namespace AmpBot {
                     End(c, requestId, manifest.transferId, ok, ok ? "" : "Sending " + mod.name + " was interrupted.");
                     if(!ok) { list.Fail("sending " + mod.folder + " failed (no acks?)"); return; }
                     list.Mark("served " + mod.folder, manifest.files.Count + " files, " + manifest.TotalBytes + " bytes");
+                    bytes += manifest.TotalBytes;
                     if(mod != mods[mods.Count - 1] && !upload.readyNext.Wait(ReadyWaitMs)) { list.Fail("no READY_NEXT after " + mod.folder); return; }
                 }
+                double sec = Math.Max(0.001, clock.Elapsed.TotalSeconds);
+                Out.Info(string.Format(System.Globalization.CultureInfo.InvariantCulture, "SERVE SUMMARY {0} mods, {1:0.0} MB in {2:0.0} s = {3:0.00} MB/s", mods.Count, bytes / 1048576.0, sec, bytes / 1048576.0 / sec));
             } catch(Exception e) {
                 list.Fail("upload threw " + e);
             }

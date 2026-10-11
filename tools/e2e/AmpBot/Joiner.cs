@@ -32,6 +32,9 @@ namespace AmpBot {
         private ModEntry receiving;
         private string staging;
         private int receivingId;
+        private System.Diagnostics.Stopwatch downloadClock;
+        private long downloadBytes;
+        private int downloadMods;
 
         public Joiner(string address, int port, string modsFolder, string cacheFolder, Expectations x, Checklist list) {
             this.address = address;
@@ -80,6 +83,9 @@ namespace AmpBot {
         public void Done() { finished = true; }
 
         public void StopPlaying() { player?.Stop(); }
+
+        public string Summary() { return watch.Summary() + (settingsChanges > 0 ? ", " + settingsChanges + " setting changes" : ""); }
+        private int settingsChanges;
 
         public void Disconnect() {
             finished = true;
@@ -218,6 +224,9 @@ namespace AmpBot {
                 cache = new ModCache(cacheFolder);
                 pending = mods.ToDictionary(m => m.folder);
                 requestId = packets[0].transferId;
+                downloadClock = System.Diagnostics.Stopwatch.StartNew();
+                downloadBytes = 0;
+                downloadMods = 0;
             }
             Out.Info("requesting " + string.Join(", ", mods.Select(m => m.folder)));
             foreach(ModSyncPacket packet in packets) Send(packet);
@@ -266,6 +275,8 @@ namespace AmpBot {
             if(entry == null) { list.Fail(mod.folder + " failed verification (hash mismatch)"); return; }
             string content = cache.ContentFolder(entry.hash);
             list.Mark("downloaded " + mod.folder, "hash " + Short(entry.hash) + " verified, " + entry.sizeBytes + " bytes");
+            downloadBytes += entry.sizeBytes;
+            downloadMods++;
             foreach(string wanted in x.files.Where(f => f.StartsWith(mod.folder + "/"))) {
                 string path = Path.Combine(content, wanted.Substring(mod.folder.Length + 1).Replace('/', '\\'));
                 if(File.Exists(path)) list.Mark("file " + wanted, new FileInfo(path).Length + " bytes");
@@ -278,6 +289,8 @@ namespace AmpBot {
                 return;
             }
             pending = null;
+            double sec = Math.Max(0.001, downloadClock.Elapsed.TotalSeconds);
+            Out.Info(string.Format(System.Globalization.CultureInfo.InvariantCulture, "TRANSFER SUMMARY {0} mods, {1:0.0} MB in {2:0.0} s = {3:0.00} MB/s", downloadMods, downloadBytes / 1048576.0, sec, downloadBytes / 1048576.0 / sec));
             Report(JoinerStatus.Ready, "downloaded the host's mods"); // the game restarts at this point; the bot just joins
         }
 
@@ -289,6 +302,7 @@ namespace AmpBot {
         private void OnSettings(byte kind, SettingsMessage message) {
             if(message == null || message.values == null) return;
             string what = kind == ModSyncPacket.SETTINGS_SNAPSHOT ? "snapshot" : "settingChanged";
+            if(kind == ModSyncPacket.SETTING_CHANGED) Interlocked.Increment(ref settingsChanges);
             Out.Info(what + ": " + string.Join(", ", message.values.Select(v => v.mod + "/" + v.option + "=" + v.title + " [" + v.index + "]")));
             if(kind == ModSyncPacket.SETTING_CHANGED) {
                 foreach(OptionValue no in x.noSettingChanged) {

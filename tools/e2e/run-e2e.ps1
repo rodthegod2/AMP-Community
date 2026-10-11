@@ -4,7 +4,8 @@
 #   run-e2e.ps1 -All                        every scenario in order, then a table
 # Safety (every run): real Mods folder set aside and restored (try/finally, verified), real saves compared with the baseline,
 # only processes started by this run are stopped, every game process must carry the isolation arguments (else it is killed at once).
-param([string]$Scenario, [switch]$All, [switch]$NoBuild, [int]$Port = 26951, [int]$TimeoutMin = 20)
+#   run-e2e.ps1 -All -Extended              also the long scenarios (Extended = $true: the player's real mod set, the soak)
+param([string]$Scenario, [switch]$All, [switch]$Extended, [switch]$NoBuild, [int]$Port = 26951, [int]$TimeoutMin = 20)
 $ErrorActionPreference = 'Stop'
 . 'C:\Projects\bns-mp\gametest\harness.ps1'
 . 'C:\Projects\bns-mp\gametest\mods-common.ps1'
@@ -32,6 +33,11 @@ $ZeroEffortId = 2512494                                      # mod.io "Zero Effo
 $SsdpPort  = $Port + 10                                      # the bot's fake UPnP router (host-upnp-fake)
 $Code127   = 'HW22-22DB-AWJ6'                               # join code of 127.0.0.1:26951 (pinned in Tests/ModSyncTests/NatTests.cs)
 $CodeFake  = 'TE29-43VB-AX3L'                               # join code of 203.0.113.7:26951, the fake router's internet address (pinned there too)
+# '*REAL*' in GameMods/BotMods: COPIES of every entry of the player's real Mods folder (read from the aside folder of this run, never changed).
+# In Expect.downloaded it stands for every enabled real mod (a folder with a manifest.json, not starting with "_"), except the host's
+# default personal mod HJ_NexusModManager, which joiners don't need.
+$Real      = '*REAL*'
+$script:RealSrc = $null
 # The player's real mod.io data (login, subscriptions, installed mod.io mods): tests isolate mod.io into the run folder, this proves it
 $ModioReal = @((Join-Path $env:LOCALAPPDATA 'mod.io\03852'), (Join-Path $env:LOCALAPPDATA 'mod.io\globalsettings.json'), (Join-Path $env:PUBLIC 'mod.io\3852'))
 
@@ -40,6 +46,30 @@ $ModioReal = @((Join-Path $env:LOCALAPPDATA 'mod.io\03852'), (Join-Path $env:LOC
 # Relaunches: how often the runner starts the game again after it closed for a restart (the Quest flow: the player starts it, not AMP).
 # RestoreInGame: the swap is undone by the game itself when it quits (Quest), not by the helper.
 # BotArgs: the bot's connection arguments instead of --host/--join. {RUN} in BotArgs and in script strings is the run folder.
+# A synthetic mod big enough to cut a transfer off at a given share: manifest.json + $Files random files of $MB megabytes
+function New-BigMod([string]$Root, [string]$Name = 'AmpE2EBig', [int]$Files = 3, [int]$MB = 16) {
+    $dir = Join-Path $Root $Name
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Set-Content -LiteralPath (Join-Path $dir 'manifest.json') -Encoding ascii -Value ('{"Name": "' + $Name + '", "Description": "AMP e2e test mod (random data)", "Author": "AMP e2e", "ModVersion": "1.0", "GameVersion": "1.0"}')
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    $buffer = New-Object byte[] ($MB * 1MB)
+    for ($i = 1; $i -le $Files; $i++) { $rng.GetBytes($buffer); [IO.File]::WriteAllBytes((Join-Path $dir "data$i.bin"), $buffer) }
+}
+
+# The bot host cuts the game's download off (Expect.dropAtPercent/dropHow): the setup must end with a clear error, Mods unchanged,
+# and joining again must download the rest and swap normally
+function New-DropScenario([int]$Percent, [string]$How) {
+    @{
+        GameMods = $Base; BotMods = $Base + $Dummy; BotMode = 'host'; BotSetup = { param($mods) New-BigMod $mods }; WaitRestore = $true; CachedFolder = 'AmpE2EBig'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
+                     @{ step = 'expectDownloadFails'; mode = 'Temporary'; contains = 'connection to the host was lost' }, @{ step = 'expectModFolder'; folder = 'AmpE2EBig'; present = $false },
+                     @{ step = 'wait'; seconds = 10 }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
+                     @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 300 }, @{ step = 'expectRejoined'; timeout = 300 },
+                     @{ step = 'expectModFolder'; folder = 'AmpE2EBig'; present = $true }, @{ step = 'quit' })
+        Expect   = @{ reports = @('needs_setup', 'needs_setup', 'ready'); served = @('AmpE2EBig'); greetings = 1; dropAtPercent = $Percent; dropHow = $How; lingerSec = 10 }
+    }
+}
+
 $Scenarios = [ordered]@{
     'host-basic' = @{
         GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
@@ -194,6 +224,98 @@ $Scenarios = [ordered]@{
                      @{ step = 'expectCachedModio'; folder = 'Fascia'; platform = 'android' }, @{ step = 'expectProfileActive'; active = $false }, @{ step = 'quit' })
         Expect   = @{ reports = @('needs_setup', 'ready'); notServed = @($SloMo, $Dummy); greetings = 1; sendQuestIds = @{ $SloMo = $SloMoId; $Dummy = -1 }; lingerSec = 10 }
     }
+    'host-realmods' = @{
+        # The player's real mod set (copies): the game hosts with all of it, the bot joins with nothing and downloads every enabled mod
+        # through AMP's transfer (the host's default upload limit applies). Measures the host's scan, the transfer and the game's memory.
+        Extended = $true; TimeoutMin = 60; Purge = $true
+        GameMods = @($Real); BotMods = @(); BotMode = 'join'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 3300 }, @{ step = 'wait'; seconds = 30 }, @{ step = 'quit' })
+        Expect   = @{ planBlocks = $true; download = $true; downloaded = @($Real); greeted = $true }
+    }
+    'join-realmods' = @{
+        # The reverse: the bot hosts the real set, the game joins with nothing, downloads everything (mod.io first where mod.io has the
+        # host's version, the rest from the host), swaps Temporary, restarts, rejoins with everything; after quitting Mods is the staged set again
+        Extended = $true; TimeoutMin = 90; Purge = $true; WaitRestore = $true; CachedFolder = "Kashimo's Technique"
+        GameMods = @(); BotMods = @($Real); BotMode = 'host'
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
+                     @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 3600 }, @{ step = 'expectRejoined'; timeout = 900 },
+                     @{ step = 'expectModFolder'; folder = "Kashimo's Technique"; present = $true }, @{ step = 'expectModFolder'; folder = 'WaterSpell'; present = $true },
+                     @{ step = 'expectModFolder'; folder = 'AT_Destiny Megapack'; present = $true }, @{ step = 'expectProfileActive'; active = $true }, @{ step = 'wait'; seconds = 30 }, @{ step = 'quit' })
+        Expect   = @{ reports = @('needs_setup', 'ready'); greetings = 1; lingerSec = 10 }
+    }
+    'soak' = @{
+        # 60+ minutes of hosting: the bot plays (avatar, walking, its sword) and leaves + rejoins every 10 minutes; the game spawns a dagger and
+        # switches PvP on and off every minute. The fake router gives a 120 s lease (-amp-test-lease, test runs only): about 60 renewals,
+        # each logged by the bot, and the delete on quit. perf.csv has the game's memory and handles every 30 s.
+        Extended = $true; TimeoutMin = 85; PerfEverySec = 30
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'
+        BotArgs  = "--join 127.0.0.1 $Port --soak 62 --rejoin-every 600 --fake-igd $SsdpPort --fake-igd-lease 120"
+        GameArgs = @('-amp-test-ssdp', "127.0.0.1:$SsdpPort", '-amp-test-lease', '120')
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'expectPortMapping'; state = 'Open' }) +
+                   @(1..64 | ForEach-Object { @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'wait'; seconds = 15 },
+                                               @{ step = 'setOption'; mod = 'MultiplayerMod'; option = 'PvP'; title = 'Enabled' }, @{ step = 'wait'; seconds = 15 },
+                                               @{ step = 'setOption'; mod = 'MultiplayerMod'; option = 'PvP'; title = 'Disabled' }, @{ step = 'wait'; seconds = 25 } }) +
+                   @(@{ step = 'quit' })
+        Expect   = @{ greeted = $true; play = $true; playItem = 'SwordShortCommon'; seePlayers = 1; seePlayerMoves = 3; seeItems = @('DaggerCommon');
+                      settingChanged = @(@{ mod = 'MultiplayerMod'; option = 'PvP'; title = 'Disabled' }); lingerSec = 0 }
+    }
+    # The host's connection is reset (like a lost network) at 30/60/95% of the download; the host quits at 50% (and hosts again 5 s later)
+    'join-drop-30'    = New-DropScenario 30 'reset'
+    'join-drop-60'    = New-DropScenario 60 'reset'
+    'join-drop-95'    = New-DropScenario 95 'reset'
+    'join-host-quits' = New-DropScenario 50 'quit'
+    'join-badnet' = @{
+        # A bad internet line (AmpBot's proxy: 75 ms each way = 150 ms round trip, 2% loss, a 5 s stall every 45 s) between the game and the
+        # bot host: the game downloads 49 MB through it, swaps, restarts, rejoins through it and plays (avatars, walking, items both ways)
+        GameMods = $Base; BotMods = $Base + $Dummy; BotMode = 'host'; BotSetup = { param($mods) New-BigMod $mods }; WaitRestore = $true; CachedFolder = 'AmpE2EBig'
+        BotArgs  = "--host $Port --proxy-port $($Port + 20) --latency-ms 75 --loss 0.02 --stall-every 45 --stall-ms 5000"
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port + 20 }, @{ step = 'expectModSync'; blocks = $true },
+                     @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 900 }, @{ step = 'expectRejoined'; timeout = 300 },
+                     @{ step = 'expectModFolder'; folder = 'AmpE2EBig'; present = $true },
+                     @{ step = 'expectRemotePlayers'; count = 1 }, @{ step = 'expectRemotePlayerMoved'; minDistance = 1 }, @{ step = 'expectItemSynced'; dataId = 'SwordShortCommon' },
+                     @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'wait'; seconds = 20 }, @{ step = 'quit' })
+        Expect   = @{ reports = @('needs_setup', 'ready'); served = @('AmpE2EBig'); greetings = 1; play = $true; playItem = 'SwordShortCommon'; seePlayers = 1; seePlayerMoves = 3
+                      seeItems = @('DaggerCommon'); seeItemMoves = 3; lingerSec = 20 }
+    }
+    'host-badnet' = @{
+        # The same line between the game host and the bot joiner: the bot downloads 49 MB through it (ack window over 150 ms), then both play
+        GameMods = $Base + $Dummy; GameSetup = { param($mods) New-BigMod $mods }; BotMods = $Base + $Dummy; BotMode = 'join'
+        BotArgs  = "--join 127.0.0.1 $Port --proxy-port $($Port + 20) --latency-ms 75 --loss 0.02 --stall-every 45 --stall-ms 5000"
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 900 },
+                     @{ step = 'expectRemotePlayers'; count = 1 }, @{ step = 'expectRemotePlayerMoved'; minDistance = 1 }, @{ step = 'expectItemSynced'; dataId = 'SwordShortCommon' },
+                     @{ step = 'spawnItem'; dataId = 'DaggerCommon' }, @{ step = 'wait'; seconds = 20 }, @{ step = 'quit' })
+        Expect   = @{ planBlocks = $true; download = $true; downloaded = @('AmpE2EBig'); greeted = $true; play = $true; playItem = 'SwordShortCommon'; equipment = @()
+                      seePlayers = 1; seePlayerMoves = 3; seeItems = @('DaggerCommon'); seeItemMoves = 3; lingerSec = 20 }
+    }
+    'host-fuzz' = @{
+        # A hostile joiner (AmpBot --fuzz) sends malformed, oversized, out-of-order and duplicate MOD_SYNC/MOD_FILE and gameplay packets and
+        # raw garbage frames, reconnecting when dropped; then a normal joiner must still get in. CheckWrites: nothing new or changed in the
+        # install outside the Mods folder and the mod cache.
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'; BotArgs = "--join 127.0.0.1 $Port --fuzz"; CheckWrites = $true; NoNaN = $true
+        # The bot stays after its normal join (lingerSec) until the game quits
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'wait'; seconds = 100; timeout = 200 },
+                     @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 10 }, @{ step = 'quit' })
+        Expect   = @{ planBlocks = $false; greeted = $true; lingerSec = 100 }
+    }
+    'host-slow-download' = @{
+        # The host's setup limit (shortened to 8 s with -amp-test-setup-timeout) must not kick a joiner whose download (64 MB at the host's
+        # 4 MB/s upload limit, about 16 s) is still moving
+        GameMods = $Base + $Dummy; GameSetup = { param($mods) New-BigMod $mods -Files 4 }; BotMods = $Base + $Dummy; BotMode = 'join'
+        GameArgs = @('-amp-test-setup-timeout', '8')
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 5 }, @{ step = 'quit' })
+        Expect   = @{ planBlocks = $true; download = $true; downloaded = @('AmpE2EBig'); greeted = $true }
+    }
+    'join-killed-swapped' = @{
+        # PC: the game is killed while the host's mods are swapped in (no quit, so no restore helper). The next start (the runner starts it,
+        # like the player) says the host's mods are still installed; "Restore my mods" restores through the helper, which relaunches the game
+        GameMods = $Base; BotMods = $Base + $Dummy; BotMode = 'host'; Relaunches = 1; WaitRestore = $true
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'join'; address = '127.0.0.1'; port = $Port }, @{ step = 'expectModSync'; blocks = $true },
+                     @{ step = 'downloadAndRestart'; mode = 'Temporary'; timeout = 300 }, @{ step = 'expectRejoined'; timeout = 300 },
+                     @{ step = 'expectModFolder'; folder = $Dummy; present = $true }, @{ step = 'killGame' },
+                     @{ step = 'waitSpawn' }, @{ step = 'expectLeftOverSwap' }, @{ step = 'expectModFolder'; folder = $Dummy; present = $true }, @{ step = 'restoreMods' },
+                     @{ step = 'waitSpawn' }, @{ step = 'expectModFolder'; folder = $Dummy; present = $false }, @{ step = 'quit' })
+        Expect   = @{ reports = @('needs_setup', 'ready'); served = @($Dummy); greetings = 1; lingerSec = 10 }
+    }
     'join-quest-sim-killed' = @{
         # As join-quest-sim, but the session ends like Android may end an app: the process dies, no quit event, so the in-game restore on
         # quit never runs. The next start must undo the swap in-game and close by itself (its catalogs came from the swapped folders);
@@ -253,6 +375,14 @@ function Read-Shared([string]$Path) {
 
 function Get-ModioShape { foreach ($p in $ModioReal) { if (Test-Path -LiteralPath $p -PathType Leaf) { $i = Get-Item -LiteralPath $p; "$p|$($i.Length)|$($i.LastWriteTimeUtc.Ticks)" } elseif (Test-Path -LiteralPath $p) { Get-TreeManifest $p | ForEach-Object { "$p\$_" } } else { "$p|missing" } } }
 
+# Every file of the game install except the Mods folder and AMP's mod cache: name, size, write time (CheckWrites)
+function Get-InstallShape {
+    # StreamingAssets\Logs: the game's own Player.log / Player-prev.log, written on every start
+    $skip = @((Join-Path $Game 'BladeAndSorcery_Data\StreamingAssets\Mods\'), (Join-Path $Game 'BladeAndSorcery_Data\StreamingAssets\AMP_ModCache\'), (Join-Path $Game 'BladeAndSorcery_Data\StreamingAssets\Logs\'))
+    Get-ChildItem -LiteralPath $Game -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { $f = $_.FullName; -not ($skip | Where-Object { $f.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }) } |
+        ForEach-Object { '{0}|{1}|{2}' -f $_.FullName.Substring($Game.Length + 1), $_.Length, $_.LastWriteTimeUtc.Ticks }
+}
+
 function Get-CommandLine([int]$Id) { (Get-CimInstance Win32_Process -Filter "ProcessId=$Id" -ErrorAction SilentlyContinue).CommandLine }
 
 # Names and sizes only: moves inside the Mods folder keep file contents but may touch folder times
@@ -294,6 +424,11 @@ function Copy-ModSet([string]$Target, [string[]]$Names, [string]$From = $BuildDi
     $manifest = if (Test-Path -LiteralPath (Join-Path $From 'manifest.json')) { Join-Path $From 'manifest.json' } else { Join-Path $Repo 'BS Files\manifest.json' }
     Copy-Item -LiteralPath $manifest -Destination $amp
     foreach ($n in $Names) {
+        if ($n -eq $Real) {
+            if (-not $script:RealSrc) { throw 'the real Mods folder is not set aside (no source for *REAL*)' }
+            Get-ChildItem -LiteralPath $script:RealSrc -Force | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Target $_.Name) -Recurse }
+            continue
+        }
         $src, $dst = if ($n.Contains('>')) { $n -split '>', 2 } else { $n, $n }
         Copy-Item -LiteralPath (Join-Path $Fixtures $src) -Destination (Join-Path $Target $dst) -Recurse
     }
@@ -350,22 +485,30 @@ function Invoke-Scenario([string]$Name) {
     New-Item -ItemType Directory -Force -Path $seed | Out-Null
     Copy-Item -LiteralPath (Get-ChildItem -LiteralPath $SavesSrc -Filter *.chr | Sort-Object Name | Select-Object -First 1).FullName, "$SavesSrc\Options.opt" -Destination $seed
     (ConvertTo-Json -InputObject @($s.Script) -Depth 5).Replace('{RUN}', $run.Replace('\', '\\')) | Set-Content -LiteralPath $script -Encoding ascii
-    $x = @{ timeoutSec = 60 * $TimeoutMin - 60 } + $s.Expect
-    ConvertTo-Json -InputObject $x -Depth 5 | Set-Content -LiteralPath $expect -Encoding ascii
+    $timeoutMin = if ($s.TimeoutMin) { $s.TimeoutMin } else { $TimeoutMin }
     $botMods = Join-Path $run 'bot-mods'
-    if ($s.BotMode -ne 'none') { Copy-ModSet $botMods $s.BotMods }
-    if ($s.BotExtraFile) { Set-Content -LiteralPath (Join-Path $botMods $s.BotExtraFile) -Encoding ascii -Value 'AMP e2e: this copy differs from the mod.io file' }
-    if ($s.BotSetup) { & $s.BotSetup $botMods }
     Note "run folder $run"
 
     $games = New-Object System.Collections.Generic.List[object]   # @{ proc; log; redirected } in start order
     $bot = $null; $t0 = $null; $staged = $null; $events = New-Object System.Collections.Generic.List[string]
     $safetyProblem = $null
+    $perf = Join-Path $run 'perf.csv'; $nextPerf = Get-Date
     & 'C:\Projects\bns-mp\gametest\mods-aside.ps1' | ForEach-Object { Note $_ }
     try {
+        $script:RealSrc = Join-Path (@(Get-UnrestoredAside))[0].FullName 'Mods'
+        $x = @{ timeoutSec = 60 * $timeoutMin - 60 } + $s.Expect
+        if ($x.downloaded -contains $Real) {
+            $x.downloaded = @(Get-ChildItem -LiteralPath $script:RealSrc -Directory | Where-Object { -not $_.Name.StartsWith('_') -and $_.Name -ne 'HJ_NexusModManager' -and (Test-Path -LiteralPath (Join-Path $_.FullName 'manifest.json')) } | ForEach-Object Name)
+            Note "expecting $($x.downloaded.Count) real mods to be downloaded"
+        }
+        ConvertTo-Json -InputObject $x -Depth 5 | Set-Content -LiteralPath $expect -Encoding ascii
+        if ($s.BotMode -ne 'none') { Copy-ModSet $botMods $s.BotMods }
+        if ($s.BotExtraFile) { Set-Content -LiteralPath (Join-Path $botMods $s.BotExtraFile) -Encoding ascii -Value 'AMP e2e: this copy differs from the mod.io file' }
+        if ($s.BotSetup) { & $s.BotSetup $botMods }
         Copy-ModSet $ModsDir $s.GameMods $(if ($s.AmpBuild) { $s.AmpBuild } else { $BuildDir })
         if ($s.GameSetup) { & $s.GameSetup $ModsDir }
         $staged = @(Get-ModsShape $ModsDir)
+        $installBefore = if ($s.CheckWrites) { @(Get-InstallShape) } else { $null }
 
         $botArgs = if ($s.BotArgs) { $s.BotArgs.Replace('{RUN}', $run) } elseif ($s.BotMode -eq 'host') { "--host $Port" } else { "--join 127.0.0.1 $Port" }
         if ($s.BotMode -ne 'none') {
@@ -384,7 +527,8 @@ function Invoke-Scenario([string]$Name) {
         & $Steam -applaunch 629730 @gameArgs
         Note 'launched through Steam'
 
-        $deadline = $t0.AddMinutes($TimeoutMin)
+        $deadline = $t0.AddMinutes($timeoutMin)
+        'seconds,pid,workingSetMB,privateMB,handles,threads,botWorkingSetMB,commitGB' | Set-Content -LiteralPath $perf -Encoding ascii
         $end = $null; $exitedAt = $null; $seen = @{}
         while ((Get-Date) -lt $deadline) {
             Start-Sleep -Milliseconds 500
@@ -429,6 +573,15 @@ function Invoke-Scenario([string]$Name) {
             if ($end) { break }
 
             $g.proc.Refresh()
+            if ((Get-Date) -ge $nextPerf -and -not $g.proc.HasExited) {
+                $nextPerf = (Get-Date).AddSeconds($(if ($s.PerfEverySec) { $s.PerfEverySec } else { 10 }))
+                try {
+                    $os = Get-CimInstance Win32_OperatingSystem
+                    $botWs = if ($bot -and -not $bot.HasExited) { $bot.Refresh(); [int]($bot.WorkingSet64 / 1MB) } else { '' }
+                    '{0},{1},{2},{3},{4},{5},{6},{7:0.0}' -f [int]((Get-Date) - $t0).TotalSeconds, $g.proc.Id, [int]($g.proc.WorkingSet64 / 1MB), [int]($g.proc.PrivateMemorySize64 / 1MB),
+                        $g.proc.HandleCount, $g.proc.Threads.Count, $botWs, (($os.TotalVirtualMemorySize - $os.FreeVirtualMemory) / 1MB) | Add-Content -LiteralPath $perf -Encoding ascii
+                } catch { }
+            }
             if ($g.proc.HasExited) {
                 if (-not $exitedAt) { $exitedAt = Get-Date; Note "game pid $($g.proc.Id) exited ($($g.proc.ExitCode)), waiting for a relaunch" }
                 # The game closed for a restart it can't do itself (Quest flow): start it again with the same arguments, like the player would
@@ -443,7 +596,7 @@ function Invoke-Scenario([string]$Name) {
             }
             if ($bot -and $bot.HasExited -and $bot.ExitCode -ne 0) { $result.reason = 'bot failed before the game finished'; break }
         }
-        if (-not $end -and -not $result.reason -and -not $safetyProblem) { $result.reason = "timed out after $TimeoutMin min" }
+        if (-not $end -and -not $result.reason -and -not $safetyProblem) { $result.reason = "timed out after $timeoutMin min" }
 
         # After DONE/FAIL the game quits by itself; otherwise (timeout, bot failure) it is stopped right away
         foreach ($g in $games) {
@@ -475,6 +628,7 @@ function Invoke-Scenario([string]$Name) {
             $helperLog = Join-Path $CacheDir 'helper\helper.log'
             $until = (Get-Date).AddSeconds($(if ($s.RestoreInGame) { 0 } else { 180 })); $restored = [bool]$s.RestoreInGame
             while ((Get-Date) -lt $until) {
+                if ((($games | ForEach-Object { $_.log }) -join "`n") -match 'Mod swap helper: helper start: restore[^\r\n]*\| done') { $restored = $true; break }
                 $hl = Read-Shared $helperLog
                 if ($hl) {
                     $last = ($hl -split "`r?`n" | Where-Object { $_ })
@@ -486,6 +640,8 @@ function Invoke-Scenario([string]$Name) {
             Wait-Helpers 60 | Out-Null
             $hl = Read-Shared $helperLog
             if ($hl) { Set-Content -LiteralPath (Join-Path $run 'helper.log') -Value $hl }
+            # A game start after the helper reads helper.log into its own log and deletes the file
+            if (-not $restored -and (($games | ForEach-Object { $_.log }) -join "`n") -match 'Mod swap helper: helper start: restore[^\r\n]*\| done') { $restored = $true }
             $journal = Join-Path $CacheDir 'session.json'
             $state = if (Test-Path -LiteralPath $journal) { (Get-Content -Raw -LiteralPath $journal | ConvertFrom-Json).state } else { 'gone' }
             $shapeNow = @(Get-ModsShape $ModsDir)
@@ -503,6 +659,16 @@ function Invoke-Scenario([string]$Name) {
             }
         }
 
+        if ($s.CheckWrites) {
+            $writes = @(Compare-Object $installBefore @(Get-InstallShape) | Where-Object { $_.SideIndicator -eq '=>' } | ForEach-Object { $_.InputObject })
+            $events.Add("install: $($writes.Count) new or changed file(s) outside Mods and AMP_ModCache" + $(if ($writes) { ': ' + ($writes -join '; ') } else { '' }))
+            if ($writes -and -not $result.reason) { $result.reason = "the game wrote into the install outside Mods/AMP_ModCache: $($writes[0])" }
+        }
+        $allLog = ($games | ForEach-Object { $_.log }) -join "`n"
+        $exceptions = @([regex]::Matches($allLog, '(?m)^.*Exception.*$') | ForEach-Object { $_.Value })
+        $events.Add("game log: $($exceptions.Count) exception line(s), $(@($exceptions | Where-Object { $_ -match 'AMP' }).Count) mentioning AMP")
+        $nan = [regex]::Matches($allLog, 'Infinity or NaN|infinite value').Count
+        if ($s.NoNaN -and $nan -gt 0 -and -not $result.reason) { $result.reason = "the game log has $nan NaN/infinity errors (bad numbers from the network reached the game)" }
         $gameOk = $end -like 'AMPTEST DONE*'
         $botOk = (-not $bot -or $bot.ExitCode -eq 0) -and $botEnd -like 'BOT DONE*'
         if (-not $gameOk -and -not $result.reason) { $result.reason = "game: $end" }
@@ -530,6 +696,15 @@ function Invoke-Scenario([string]$Name) {
         if ($modioDiff) { $modioDiff | Out-String | Write-Host; throw 'SAFETY: the real mod.io data changed during the run - STOP' }
         Note 'real mod.io data unchanged' 
         $events | ForEach-Object { Note "  $_" }
+        # Copies of the real mods are large: once the run is over only the logs stay (they are copies, the real Mods are back in place)
+        $runBytes = (Get-ChildItem -LiteralPath $run -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+        if ($s.Purge -and $runBytes -gt 2GB) {
+            foreach ($big in 'bot-mods', 'bot-cache', 'mods-after', 'AMP_ModCache', 'docs\modio') {
+                $p = Join-Path $run $big
+                if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
+            }
+            Note ("removed the mod copies of this run ({0:N1} GB), kept the logs" -f ($runBytes / 1GB))
+        }
     }
     if ($safetyProblem) { throw "SAFETY: $safetyProblem" }
     $result.seconds = [int]((Get-Date) - $started).TotalSeconds
@@ -539,7 +714,7 @@ function Invoke-Scenario([string]$Name) {
 
 if (-not $All -and -not $Scenario) { throw "use -Scenario <$($Scenarios.Keys -join '|')> or -All" }
 if (-not $NoBuild) { Build-All; if ($All -or $Scenario -eq 'self-update') { Build-OldAmp } }
-$names = if ($All) { @($Scenarios.Keys) } else { @($Scenario) }
+$names = if ($All) { @($Scenarios.Keys | Where-Object { $Extended -or -not $Scenarios[$_].Extended }) } else { @($Scenario) }
 $results = foreach ($n in $names) { Invoke-Scenario $n }
 $results | Format-Table scenario, status, seconds, reason -AutoSize | Out-String -Width 250 | Write-Host
 $results | ForEach-Object { Write-Host "$($_.scenario) timings: $($_.timings)" }

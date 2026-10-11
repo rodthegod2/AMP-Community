@@ -10,6 +10,7 @@ namespace AMP.Network.Nat {
     // it at a fake router.
     internal static class HostPortMapping {
         internal const string TestSsdpFlag = "-amp-test-ssdp";
+        internal const string TestLeaseFlag = "-amp-test-lease"; // seconds, with -amp-test-ssdp only: a short lease so a soak sees renewals
 
         private static PortMapper current; // kept after Stop so quitting can wait for its deletes
         private static bool hosting;
@@ -40,7 +41,9 @@ namespace AMP.Network.Nat {
                 IPEndPoint target = ParseEndpoint(testTarget);
                 if(target == null) { current.TurnOff("bad " + TestSsdpFlag + " value", previous); return; }
                 current.SearchTarget = target;
-                Log.Info(Defines.SERVER, "UPnP: test run, using the fake router at " + target);
+                int lease;
+                if(int.TryParse(ModSync.AutopilotScript.FindArg(Environment.GetCommandLineArgs(), TestLeaseFlag) ?? "", out lease) && lease >= 10) current.LeaseSeconds = lease;
+                Log.Info(Defines.SERVER, "UPnP: test run, using the fake router at " + target + ", lease " + current.LeaseSeconds + " s");
             } else if(testRun) {
                 current.TurnOff("test run", previous);
                 return;

@@ -395,7 +395,8 @@ internal static partial class Program {
         }
     }
 
-    // ModSyncTests.exe --real-router <port> <lease>: the owner-approved check against the real router. Only this port, only this PC,
+    // ModSyncTests.exe --real-router <port> <lease> [<renewals>]: the owner-approved check against the real router. Only this port, only this PC,
+    // (renewals: let PortMapper renew the lease that many times, every lease/2, and read the entry back after each renewal)
     // a short lease (expires by itself if anything goes wrong); refuses to touch a port that already has a mapping. Never prints the public IP.
     private static int RealRouter(string[] args) {
         int port = args.Length > 1 ? int.Parse(args[1]) : JoinCodes.DefaultPort;
@@ -436,6 +437,19 @@ internal static partial class Program {
                     bool good = e != null && e.InternalClient == s.LocalIp.ToString() && e.InternalPort == port && e.Description == PortMapper.Description && e.LeaseSeconds <= lease;
                     say("verify " + protocol + ": " + (e == null ? "MISSING" : "client is this PC=" + (e.InternalClient == s.LocalIp.ToString()) + ", port " + e.InternalPort + ", '" + e.Description + "', lease left " + e.LeaseSeconds + ", enabled " + e.Enabled) + " -> " + (good ? "OK" : "BAD"));
                     ok &= good;
+                }
+                int wantRenewals = args.Length > 3 ? int.Parse(args[3]) : 0;
+                for(int r = 1; r <= wantRenewals && ok; r++) {
+                    DateTime until = DateTime.UtcNow.AddSeconds(PortMapper.RenewAfterSeconds(lease) + 60);
+                    while(mapper.Renewals < r && DateTime.UtcNow < until) Thread.Sleep(500);
+                    if(mapper.Renewals < r) { say("renewal " + r + ": DIDN'T HAPPEN (state " + mapper.Status.State + ")"); ok = false; break; }
+                    foreach(string protocol in PortMapper.Protocols) {
+                        PortMappingEntry e = igd.GetSpecificPortMappingEntry(port, protocol);
+                        // Renewed: the lease left is close to the full lease again (it was down to about half before)
+                        bool good = e != null && e.InternalClient == s.LocalIp.ToString() && e.InternalPort == port && e.Description == PortMapper.Description && e.LeaseSeconds > lease - 30;
+                        say("renewal " + r + " " + protocol + " at " + DateTime.Now.ToString("HH:mm:ss") + ": " + (e == null ? "MISSING" : "client is this PC=" + (e.InternalClient == s.LocalIp.ToString()) + ", '" + e.Description + "', lease left " + e.LeaseSeconds) + " -> " + (good ? "OK" : "BAD"));
+                        ok &= good;
+                    }
                 }
             } else ok = s.State == MapState.Shared; // nothing to map behind CGNAT
         } finally {

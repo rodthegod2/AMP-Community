@@ -127,6 +127,11 @@ namespace AmpBot {
         }
 
         public void IgnorePlayer(int id) { lock(ignore) ignore.Add(id); }
+
+        public string Summary() {
+            return players.Count + " other player(s), " + playerMoves.Values.Sum() + " player position updates, " + itemTypes.Count + " items ("
+                 + string.Join(", ", itemTypes.Values.GroupBy(t => t).Select(g => g.Count() + "x " + g.Key)) + "), " + itemMoves.Values.Sum() + " item position updates";
+        }
         private bool Ignored(int id) { lock(ignore) return ignore.Contains(id); }
 
         public void OnPlayerData(PlayerDataPacket p) {

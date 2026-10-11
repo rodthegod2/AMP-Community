@@ -8,10 +8,12 @@ namespace AmpBot {
     public static class Out {
         private static readonly object gate = new object();
         public static string Prefix = "BOT ";
+        private static readonly DateTime started = System.Diagnostics.Process.GetCurrentProcess().StartTime;
 
+        // "BOT <kind> +<seconds since start>s <text>"
         public static void Line(string kind, string text) {
             lock(gate) {
-                Console.WriteLine(Prefix + kind + " " + (text ?? "").Replace("\r", " ").Replace("\n", " | "));
+                Console.WriteLine(Prefix + kind + " +" + (DateTime.Now - started).TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "s " + (text ?? "").Replace("\r", " ").Replace("\n", " | "));
                 Console.Out.Flush();
             }
         }
