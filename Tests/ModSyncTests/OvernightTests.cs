@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using AMP.ModSync;
 
 // Bugs found in the overnight test-and-harden pass (docs/overnight-2026-10-11.md)
@@ -7,6 +9,29 @@ internal static partial class Program {
         SetupTimeoutTests();
         PacketNumberTests();
         GameVersionTests();
+        DamagePolicyTests();
+        ItemCapTests();
+    }
+
+    // Audit 10: the item cap removed held items (the starting weapon on the hip)
+    private static void ItemCapTests() {
+        Func<int[], int[], int, string> pick = (free, held, limit) => string.Join(",", AMP.Network.Data.ItemCapPolicy.PickEvictions(
+            free.Select(i => new KeyValuePair<int, bool>(i, false)).Concat(held.Select(i => new KeyValuePair<int, bool>(i, true))), limit));
+        T("item cap: under the limit -> nothing", pick(new[] { 1, 2 }, new[] { 3 }, 3) == "");
+        T("item cap: oldest free items go first", pick(new[] { 5, 2, 9 }, new int[0], 1) == "2,5");
+        T("item cap: held items are never picked", pick(new[] { 4, 6 }, new[] { 1, 2 }, 3) == "4");
+        T("item cap: all held -> nothing", pick(new int[0], new[] { 1, 2, 3 }, 1) == "");
+        T("item cap: limit 0 means off", pick(new[] { 1, 2 }, new int[0], 0) == "");
+    }
+
+    // Audit finding 3: every client that saw a hit reported it
+    private static void DamagePolicyTests() {
+        T("damage: a remote player's avatar hit by me is reported", AMP.Network.Data.DamageReportPolicy.ReportPlayerPuppetDamage(true));
+        T("damage: a remote player's avatar hit by an NPC is not (their own game applies it)", !AMP.Network.Data.DamageReportPolicy.ReportPlayerPuppetDamage(false));
+        Func<bool, bool, bool, bool> npc = AMP.Network.Data.DamageReportPolicy.ReportCreatureDamage;
+        T("damage: my hit on an NPC is reported, owned or not", npc(true, false, false) && npc(true, false, true));
+        T("damage: another player's hit on an NPC is not reported by me, owned or not", !npc(false, true, false) && !npc(false, true, true));
+        T("damage: other causes are reported by the NPC's owner only", npc(false, false, true) && !npc(false, false, false));
     }
 
     // Quest research: PC is on 1.3.1.x, Nomad's build is unknown; AMP never compared game versions, a joiner is now told (never blocked)

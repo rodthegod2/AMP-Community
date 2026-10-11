@@ -11,16 +11,15 @@ namespace AMP.Network.Data {
             if(ModManager.safeFile.hostingSettings.maxItemsPerPlayer == 0) return;
 
             KeyValuePair<int, int>[] items = ModManager.serverInstance.item_owner.Where(val => val.Value == client.ClientId).ToArray();
+            if(items.Length <= ModManager.safeFile.hostingSettings.maxItemsPerPlayer) return;
 
-            if(items.Count() > ModManager.safeFile.hostingSettings.maxItemsPerPlayer) {
-                int to_remove = items.Count() - ModManager.safeFile.hostingSettings.maxItemsPerPlayer;
-
-                items = items.OrderBy(val => val.Key).ToArray();
-                for(int i = 0; i < to_remove; i++) {
-                    int itemId = items[i].Key;
-
-                    new ItemDespawnPacket(itemId).ProcessServer(ModManager.serverInstance.netamiteServer, ClientData.SERVER);
-                }
+            var owned = items.Select(val => {
+                Sync.ItemNetworkData ind;
+                bool held = ModManager.serverInstance.items.TryGetValue(val.Key, out ind) && ind.holdingStates != null && ind.holdingStates.Length > 0;
+                return new KeyValuePair<int, bool>(val.Key, held);
+            });
+            foreach(int itemId in ItemCapPolicy.PickEvictions(owned, ModManager.safeFile.hostingSettings.maxItemsPerPlayer)) {
+                new ItemDespawnPacket(itemId).ProcessServer(ModManager.serverInstance.netamiteServer, ClientData.SERVER);
             }
         }
 
