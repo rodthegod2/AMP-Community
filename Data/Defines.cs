@@ -6,7 +6,7 @@
         public static string MOD_SUFFIX       = "-1";
         public static string FULL_MOD_VERSION = MOD_VERSION + MOD_SUFFIX;
         // The community fork's own version (semver); releases are tagged v<this>. MOD_VERSION above stays the upstream protocol label.
-        public const string COMMUNITY_VERSION = "1.2.0";
+        public const string COMMUNITY_VERSION = "1.2.1";
         public static string MOD_NAME         = "AMP " + FULL_MOD_VERSION;
         
         public const string AMP           = "AMP";
