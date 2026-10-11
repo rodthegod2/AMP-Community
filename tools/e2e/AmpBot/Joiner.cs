@@ -71,7 +71,9 @@ namespace AmpBot {
                 c.OnDataReceived += OnPacket;
                 client = c;
                 c.Connect("");
-                answered.WaitOne(TimeSpan.FromSeconds(30));
+                // OnConnect sometimes comes late (or not at all) although packets already flow: also stop waiting once connected
+                DateTime waitUntil = DateTime.UtcNow.AddSeconds(30);
+                while(!answered.WaitOne(200) && !c.IsConnected && DateTime.UtcNow < waitUntil) { }
                 if(c.IsConnected) {
                     Out.Info("connected to " + address + ":" + port + " as client " + c.ClientId);
                     watch.IgnorePlayer(c.ClientId);
