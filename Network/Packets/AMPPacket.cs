@@ -15,7 +15,14 @@ namespace AMP.Network.Packets {
         public virtual bool ProcessServer(NetamiteServer server, ClientData client) { return false; }
 
         public override bool ProcessServer(NetamiteServer server, ClientInformation client) {
+            if(!PacketNumbers.AllFinite(this)) {
+                // Handled (dropped): never relayed to the other players
+                if(warned.TryAdd(GetType().Name + ":" + client.ClientId, true)) AMP.Logging.Log.Warn(AMP.Data.Defines.SERVER, client.ClientName + " sent a " + GetType().Name + " with invalid numbers (NaN/infinite), ignoring those.");
+                return true;
+            }
             return ProcessServer(server, (ClientData) client);
         }
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> warned = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>();
     }
 }

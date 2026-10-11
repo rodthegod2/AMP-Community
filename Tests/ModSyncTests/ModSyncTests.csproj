@@ -34,6 +34,7 @@
     <Compile Include="..\..\ModSync\ModMatcher.cs" />
     <Compile Include="NatTests.cs" />
     <Compile Include="OvernightTests.cs" />
+    <Compile Include="..\..\Network\Packets\PacketNumbers.cs" />
     <Compile Include="FakeIgd.cs" />
     <Compile Include="..\..\Network\Nat\JoinCodes.cs" />
     <Compile Include="..\..\Network\Nat\Upnp.cs" />

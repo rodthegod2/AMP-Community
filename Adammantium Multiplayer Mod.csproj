@@ -222,6 +222,7 @@
     <Compile Include="Network\Broadcast.cs" />
     <Compile Include="Network\NetworkStats.cs" />
     <Compile Include="Network\Packets\AMPPacket.cs" />
+    <Compile Include="Network\Packets\PacketNumbers.cs" />
     <Compile Include="Network\Packets\EntityPositionPacket.cs" />
     <Compile Include="Network\Packets\Implementation\BookAvailabilityPacket.cs" />
     <Compile Include="Network\Packets\Implementation\ChangeFactionPacket.cs" />

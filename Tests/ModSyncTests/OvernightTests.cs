@@ -5,6 +5,27 @@ using AMP.ModSync;
 internal static partial class Program {
     private static void OvernightTests() {
         SetupTimeoutTests();
+        PacketNumberTests();
+    }
+
+    private struct Vec { public float x, y, z; public Vec(float x, float y, float z) { this.x = x; this.y = y; this.z = z; } }
+    private class FakePositionPacket { public int id; public string name; public Vec position; public float height; public Vec[] path; public bool flag; }
+
+    // A joiner's NaN/infinite position was relayed to every player (fuzz test: thousands of Unity errors per second on the host)
+    private static void PacketNumberTests() {
+        Func<FakePositionPacket> ok = () => new FakePositionPacket { id = 1, name = "x", position = new Vec(1, 2, 3), height = 1.8f, path = new[] { new Vec(0, 0, 0) } };
+        T("numbers: a normal packet passes", AMP.Network.Packets.PacketNumbers.AllFinite(ok()));
+        T("numbers: null arrays and strings pass", AMP.Network.Packets.PacketNumbers.AllFinite(new FakePositionPacket()));
+        var p = ok(); p.position = new Vec(float.NaN, 0, 0);
+        T("numbers: NaN in a vector is caught", !AMP.Network.Packets.PacketNumbers.AllFinite(p));
+        p = ok(); p.position = new Vec(0, 0, float.PositiveInfinity);
+        T("numbers: infinity in a vector is caught", !AMP.Network.Packets.PacketNumbers.AllFinite(p));
+        p = ok(); p.height = float.PositiveInfinity;
+        T("numbers: plain float fields are left alone (health may be infinite)", AMP.Network.Packets.PacketNumbers.AllFinite(p));
+        p = ok(); p.path = new[] { new Vec(0, 0, 0), new Vec(0, float.NaN, 0) };
+        T("numbers: NaN inside an array of vectors is caught", !AMP.Network.Packets.PacketNumbers.AllFinite(p));
+        p = ok(); p.position = new Vec(float.MaxValue, -float.MaxValue, 1e30f);
+        T("numbers: huge but finite values pass (the game decides about those)", AMP.Network.Packets.PacketNumbers.AllFinite(p));
     }
 
     // The host's 30 min setup limit kicked joiners whose big download over a slow upload was still running
