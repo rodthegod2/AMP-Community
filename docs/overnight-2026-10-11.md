@@ -23,7 +23,7 @@ SnapAV AN-110-RT-2L1W, public address. TCP+UDP 26950 → this PC, "AMP Community
 
 ## Gameplay audit (research/overnight-audit.md)
 Each re-checked against code/decomp; E2E scenarios failed before and pass after:
-imbue echo/energy (a1e4296, `host-imbue`), damage reported once (e45f950, unit tests only - needs two real clients), level-change ghost entries (dbcf038, `host-level-change`), NPC health + shared catalog (c0ec3ea, `join-npc-health`), leaving player's items (dd1e235, `host-holder-leaves`), owner race lock (ce15c1f; `host-owner-race` passes, but also passed without the lock: race not reproduced), allocations/scans (90e69bc), packet hardening (708f195), QOL: notices, Go to, joiners next to host, pulled back instead of kicked (d0032e3). Not done: "resync world" (clears and respawns the player's own held items; too risky untested), SizeChangePacket (dead code left).
+imbue echo/energy (a1e4296, `host-imbue`), ~~damage reported once~~ (e45f950, **reverted** in ae48002 after review: it made a joiner's punches on host NPCs count for nothing; needs a 2-client test), level-change ghost entries (dbcf038, `host-level-change`), NPC health + shared catalog (c0ec3ea, `join-npc-health`), leaving player's items (dd1e235, `host-holder-leaves`), owner race lock (ce15c1f; `host-owner-race` passes, but also passed without the lock: race not reproduced), allocations/scans (90e69bc), packet hardening (708f195), QOL: notices, Go to, joiners next to host, pulled back instead of kicked (d0032e3). Not done: "resync world" (clears and respawns the player's own held items; too risky untested), SizeChangePacket (dead code left).
 
 ## Quest (research/quest-nomad.md)
 e9f3cbf: Discord off on Android (it threw every FixedUpdate), host game version sent and a joiner warned on mismatch (never blocks), no System.Drawing reference, `[ModSupportedPlatforms(Windows|Android)]`, docs: confirmed Mods path, logs in files/Logs. Startup restore when quitting isn't signalled: covered by `join-quest-sim-killed`. ModOption hang risk noted in the checklist. Nothing verified on a headset.
@@ -36,3 +36,12 @@ COMMUNITY_VERSION 1.2.1; `tools/make-release.sh 1.2.1` staged dist/AMP-Community
 
 ## Safety
 Every run: real Mods moved aside and restored (manifest verified), real saves unchanged (only steam_autocloud.vdf time exempt), real mod.io data unchanged, only own PIDs stopped, commit charge 18-37 GB. Final state: no unrestored aside folder, no AMP_ModCache in the install, doorstop enabled=false, no game/bot/helper process, real router mapping deleted and verified gone (05:54; tests never touch it). Real-mod copies removed from run folders (logs kept). Side effect: test runs rewrite the game's own StreamingAssets\Logs\Player.log.
+
+## Review follow-up (same day, after an independent review said no-ship)
+- Damage change reverted (ae48002), see above.
+- Map changes off: MainMenu checked before the pull-back, the host's own client exempt (8d95d0b; unit tests + E2E host loads Arena).
+- NaN check: typed checks in the movement/spawn packets instead of per-packet reflection (216176a).
+- `spawnJoinersNearHost` defaults to false (208103a).
+- Game version warning compares major.minor.patch only; unreadable formats say nothing (3027a95).
+- Setup limit also waits while a joiner's mod.io download moves (keep-alive reports, f9b35ca; E2E host-setup-keepalive).
+- Known, not addressed: review items M2, M3, M5.
