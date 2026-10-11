@@ -2357,6 +2357,16 @@ namespace AMP.UI {
                     });
                     hideNameplateBtn.transform.SetParent(gobj.transform, false);
                     ((RectTransform)hideNameplateBtn.transform).sizeDelta = new Vector2(400, 50);
+
+                    // Local only: puts you next to that player (big maps, dungeons); nothing is sent, the server sees a normal move
+                    Button goToBtn = CreateButton("Go to", Color.black, new Vector2(400, 50));
+                    goToBtn.onClick.AddListener(() => {
+                        if(Player.local == null || pnd.creature == null) return;
+                        Vector3 target = pnd.creature.transform.position - pnd.creature.transform.forward * 1.5f;
+                        Player.local.Teleport(target, Quaternion.Euler(0, pnd.creature.transform.eulerAngles.y, 0));
+                    });
+                    goToBtn.transform.SetParent(gobj.transform, false);
+                    ((RectTransform) goToBtn.transform).sizeDelta = new Vector2(400, 50);
                     
                     if (ModManager.clientSync.syncData.permissionLevel < Datatypes.PermissionLevel.LOBBY_ADMIN) {
                         Texture2D voteKickIcon = new Texture2D(2, 2);

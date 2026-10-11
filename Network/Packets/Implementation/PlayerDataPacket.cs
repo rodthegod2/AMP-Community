@@ -68,8 +68,10 @@ namespace AMP.Network.Packets.Implementation {
                 #endif
             }
 
+            bool isNew = !ModManager.clientSync.syncData.players.ContainsKey(clientId);
             PlayerNetworkData pnd = ModManager.clientSync.syncData.players.GetOrAdd(clientId, new PlayerNetworkData());
             pnd.Apply(this);
+            if(isNew) GameInteraction.PlayerNotices.Joined(pnd.name);
             
             /*
             Dispatcher.Enqueue(() => {

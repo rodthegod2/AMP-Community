@@ -273,6 +273,7 @@ namespace AMP {
             // Stop the old client right away, a queued stop would run after the new client is set up and kill it instead
             if(clientInstance != null) StopClientImmediatly();
             ModSync.ModSyncClient.Reset();
+            GameInteraction.PlayerNotices.ConnectionStarted();
 
             if(instance.gameObject.GetComponent<ClientSync>() != null) {
                 Destroy(instance.gameObject.GetComponent<ClientSync>());

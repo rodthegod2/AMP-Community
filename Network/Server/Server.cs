@@ -185,6 +185,22 @@ namespace AMP.Network.Server {
             client.LoadedLevel = true;
 
             ModSync.SettingsSyncHost.SendSnapshot(client);
+            BringToHost(client);
+        }
+
+        // hostingSettings.spawnJoinersNearHost: a moment after the greeting (the joiner's player is spawned by then), next to the host's player
+        private void BringToHost(ClientData joiner) {
+            if(!ModManager.safeFile.hostingSettings.spawnJoinersNearHost) return;
+            int hostId = ModManager.clientInstance?.netclient != null ? ModManager.clientInstance.netclient.ClientId : -1;
+            if(hostId < 0 || joiner.ClientId == hostId) return;
+            Task.Delay(2000).ContinueWith(_ => {
+                ClientData host = GetClientById(hostId);
+                if(host == null || host._player == null || ModManager.serverInstance != this || GetClientById(joiner.ClientId) != joiner) return;
+                UnityEngine.Vector3 at = host.player.position;
+                if(at == UnityEngine.Vector3.zero) return; // the host's position isn't known yet
+                joiner.Teleport(at + new UnityEngine.Vector3(1.5f, 0.2f, 1.5f), host.player.rotationY);
+                Log.Info(Defines.SERVER, $"Brought {joiner.ClientName} to the host.");
+            });
         }
 
         /// <summary>

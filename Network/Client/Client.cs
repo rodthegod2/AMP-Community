@@ -54,6 +54,7 @@ namespace AMP.Network.Client {
                             PlayerNetworkData ps = ModManager.clientSync.syncData.players[disconnectPacket.ClientId];
                             ModManager.clientSync.LeavePlayer(ps);
                             Log.Info(Defines.CLIENT, $"{ps.name} disconnected: " + disconnectPacket.Reason);
+                            GameInteraction.PlayerNotices.Left(ps.name);
                         }
                     }
                     break;

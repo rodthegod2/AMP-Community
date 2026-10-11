@@ -113,8 +113,12 @@ namespace AMP.Network.Packets.Implementation {
                 )) { // Player is the first to join that level
 
                 if(!ModManager.safeFile.hostingSettings.allowMapChange && client.ClientId > 0) {
-                    Log.Err(Defines.SERVER, $"{client.ClientName} tried changing level.");
-                    client.Kick("Player tried to change level.");
+                    // A portal or the map by accident shouldn't cost the session: the player is sent back to the host's level instead of kicked
+                    Log.Warn(Defines.SERVER, $"{client.ClientName} tried changing level (map changes are off), sending them back to {ModManager.serverInstance.currentLevel}.");
+                    if(eventTime == EventTime.OnEnd && !string.IsNullOrEmpty(ModManager.serverInstance.currentLevel)) {
+                        client.ShowText("level_change", "Only the host changes the map on this server.\nTaking you back.", Color.yellow, 8);
+                        server.SendTo(client, new LevelChangePacket(ModManager.serverInstance.currentLevel, ModManager.serverInstance.currentMode, ModManager.serverInstance.currentOptions));
+                    }
                     return true;
                 }
                 if(level.ToLower().Equals("mainmenu")) {

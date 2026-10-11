@@ -28,7 +28,8 @@ namespace AMP.Network.Packets.Implementation {
 
         public override bool ProcessClient(NetamiteClient client) {
             if(ModManager.clientSync.syncData.players.ContainsKey(playerId)) {
-                ModManager.clientSync.syncData.players[playerId].Apply(this);
+                PlayerNetworkData pnd = ModManager.clientSync.syncData.players[playerId];
+                if(pnd.Apply(this)) GameInteraction.PlayerNotices.Died(pnd.name);
             }
             return true;
         }
