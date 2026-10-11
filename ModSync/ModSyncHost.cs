@@ -198,7 +198,11 @@ namespace AMP.ModSync {
                 ResendWhenMatched(server, client, client.modSyncPlatform); // after the transition: a pass that's already done resends at once and needs CHECKING
                 Task.Delay(CHECK_TIMEOUT_MS).ContinueWith(_ => OnCheckTimeout(server, client, mode));
             } else if(report.status == JoinerStatus.NeedsSetup) {
-                if(!Transition(client, SETUP, WAITING, CHECKING)) return;
+                if(!Transition(client, SETUP, WAITING, CHECKING)) {
+                    // Repeated while the joiner downloads from mod.io (nothing the host sees otherwise): its setup is still moving
+                    if(IsSettingUp(client)) Interlocked.Exchange(ref client.modSyncKeepAliveTicks, DateTime.UtcNow.Ticks);
+                    return;
+                }
                 Log.Info(Defines.SERVER, $"Mod sync: {client.ClientName} ({report.platform}) needs to set up mods:\n{report.detail}");
                 Task.Delay(setupTimeoutMs).ContinueWith(_ => OnSetupTimeout(server, client));
             }
@@ -208,7 +212,10 @@ namespace AMP.ModSync {
         // A big mod set over a slow upload can take longer than the setup time: a joiner whose download from this host still moves stays
         private static void OnSetupTimeout(ServerType server, ClientData client) {
             if(!IsConnected(server, client)) return;
-            if(TransferRules.DownloadStillMoving(DateTime.UtcNow, ModTransferHost.LastProgress(client), TimeSpan.FromMilliseconds(SETUP_STALL_MS))) {
+            DateTime? moved = ModTransferHost.LastProgress(client);
+            long keepAlive = Interlocked.Read(ref client.modSyncKeepAliveTicks);
+            if(keepAlive > 0 && (!moved.HasValue || keepAlive > moved.Value.Ticks)) moved = new DateTime(keepAlive, DateTimeKind.Utc);
+            if(TransferRules.DownloadStillMoving(DateTime.UtcNow, moved, TimeSpan.FromMilliseconds(SETUP_STALL_MS))) {
                 if(IsSettingUp(client)) Task.Delay(SETUP_RECHECK_MS).ContinueWith(_ => OnSetupTimeout(server, client));
                 return;
             }

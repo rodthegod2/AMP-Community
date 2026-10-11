@@ -353,6 +353,13 @@ $Scenarios = [ordered]@{
                      @{ step = 'wait'; seconds = 60 }, @{ step = 'quit' })
         Expect   = @{ greeted = $false }
     }
+    'host-setup-keepalive' = @{
+        # A joiner that downloads from mod.io (the host sees no transfer) repeats "needs_setup": the host's setup limit (8 s here) must
+        # wait while those keep coming (review M4); after 30 s the bot says ready and is greeted
+        GameMods = $Base + $Dummy; BotMods = $Base + $Dummy; BotMode = 'join'; GameArgs = @('-amp-test-setup-timeout', '8')
+        Script   = @(@{ step = 'waitSpawn' }, @{ step = 'host'; port = $Port; maxPlayers = 4 }, @{ step = 'waitPlayers'; count = 2; timeout = 300 }, @{ step = 'wait'; seconds = 5 }, @{ step = 'quit' })
+        Expect   = @{ greeted = $true; keepAliveSec = 30 }
+    }
     'host-slow-download' = @{
         # The host's setup limit (shortened to 8 s with -amp-test-setup-timeout) must not kick a joiner whose download (64 MB at the host's
         # 4 MB/s upload limit, about 16 s) is still moving

@@ -135,7 +135,7 @@ namespace AMP.ModSync {
                 CacheEntry reused = null;
                 string crashed = null;
                 yield return ModioClient.Guarded(ModioClient.Download(modioId, cache, maxBytes,
-                    p => { if(attempt == current) Progress("Downloading " + name + " from mod.io...\n" + (int) (p * 100) + "%"); },
+                    p => { if(attempt == current) { Progress("Downloading " + name + " from mod.io...\n" + (int) (p * 100) + "%"); ModSyncClient.KeepSetupAlive(); } },
                     () => attempt == current, r => download = r, fileId => (reused = cache.FindModioFile(modioId, fileId)) != null),
                     e => crashed = e.GetType().Name + ": " + e.Message);
                 if(attempt != current) yield break;
@@ -203,7 +203,7 @@ namespace AMP.ModSync {
                 ModioClient.DownloadResult download = null;
                 string crashed = null;
                 yield return ModioClient.Guarded(ModioClient.Download(mod.modioId, cache, maxBytes,
-                    p => { if(attempt == current) Progress("Downloading " + name + " from mod.io...\n" + (int) (p * 100) + "%"); },
+                    p => { if(attempt == current) { Progress("Downloading " + name + " from mod.io...\n" + (int) (p * 100) + "%"); ModSyncClient.KeepSetupAlive(); } },
                     () => attempt == current, r => download = r), e => crashed = e.GetType().Name + ": " + e.Message);
                 if(attempt != current) yield break;
                 if(download == null || download.error != null) {

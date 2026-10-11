@@ -32,6 +32,7 @@ namespace AmpBot {
         public int seePlayerMoves;         // position updates of another player that must arrive
         public List<string> seeItems = new List<string>(); // item ids another player must spawn
         public int seeItemMoves;           // position updates that must arrive for each of those items
+        public int keepAliveSec;           // join: say needs_setup and repeat it every 5 s for this long (like a joiner downloading from mod.io), then ready
         public bool broughtToHost;         // join: the host teleports us next to its player after the greeting (spawnJoinersNearHost)
         public string wanderTo;            // join: 5 s after the greeting, report being in this level (like walking through a portal); the host
                                            // must send us back to its level ("pulledBack") and not kick us

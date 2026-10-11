@@ -173,6 +173,16 @@ namespace AMP.ModSync {
             ShowNotice("Your mods don't match the host's.\nOpen the book: Mods > AMP.");
         }
 
+        private static float lastKeepAlive;
+
+        // Main thread, while a mod.io download of the setup moves: the host only sees its own transfers, so a repeated "needs_setup" (at
+        // most once a minute) tells it the setup is still alive (hosts before 1.2.1 ignore it). Its setup time limit then waits.
+        internal static void KeepSetupAlive() {
+            if(Time.realtimeSinceStartup - lastKeepAlive < 60f) return;
+            lastKeepAlive = Time.realtimeSinceStartup;
+            Report(ModManager.clientInstance, JoinerStatus.NeedsSetup, "");
+        }
+
         // Only offered when the host runs mod sync in "warn" mode
         internal static void JoinAnyway() {
             if(!AwaitingDecision) return;

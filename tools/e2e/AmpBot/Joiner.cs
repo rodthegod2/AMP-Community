@@ -53,6 +53,7 @@ namespace AmpBot {
             if(!string.IsNullOrEmpty(x.snapSlot)) list.Expect("snapped");
             if(!string.IsNullOrEmpty(x.wanderTo)) list.Expect("pulledBack");
             if(x.broughtToHost) list.Expect("broughtToHost");
+            if(x.keepAliveSec > 0) list.Expect("keptAlive");
             if(x.questResend) list.Expect("questResend");
             foreach(OptionValue v in x.snapshot) list.Expect("snapshot " + v.mod + "/" + v.option + (string.IsNullOrEmpty(v.title) ? "" : "=" + v.title));
             foreach(OptionValue v in x.settingChanged) list.Expect("settingChanged " + v.mod + "/" + v.option + "=" + v.title);
@@ -275,6 +276,17 @@ namespace AmpBot {
                 else { list.Fail("expected the plan to " + (x.planBlocks.Value ? "block" : "not block") + " joining"); return; }
             }
 
+            if(x.keepAliveSec > 0) {
+                Report(JoinerStatus.NeedsSetup, "downloading from mod.io (test)");
+                new Thread(() => {
+                    DateTime end = DateTime.UtcNow.AddSeconds(x.keepAliveSec);
+                    while(DateTime.UtcNow < end && list.Failure == null) { Thread.Sleep(5000); Report(JoinerStatus.NeedsSetup, ""); }
+                    if(list.Failure != null) return;
+                    list.Mark("keptAlive", "still connected after " + x.keepAliveSec + " s of setup");
+                    Report(JoinerStatus.Ready, "");
+                }) { IsBackground = true }.Start();
+                return;
+            }
             if(!plan.BlocksJoin) { Report(JoinerStatus.Ready, ""); return; }
             if(!x.download) { Report(JoinerStatus.Ready, plan.Describe()); return; } // "join anyway"
 
