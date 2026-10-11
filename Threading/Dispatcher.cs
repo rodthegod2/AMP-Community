@@ -37,13 +37,14 @@ namespace AMP.Threading {
             string caller = stackTrace.GetFrame(1).GetMethod().ReflectedType.Name + "." + stackTrace.GetFrame(1).GetMethod().Name;
 			#endif
 
+            #if FULL_DEBUG
             executionQueue.Enqueue(() => {
-                #if FULL_DEBUG
 				Log.Warn("DEBUG", caller);
-				#endif
-
 				action();
 			});
+            #else
+            executionQueue.Enqueue(action); // no wrapper closure per call (thousands per second while playing)
+            #endif
         }
 
 	}

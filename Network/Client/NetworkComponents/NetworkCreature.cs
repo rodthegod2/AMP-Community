@@ -520,6 +520,7 @@ namespace AMP.Network.Client.NetworkComponents {
         #region Magic Syncing
         private class CastingInfo {
             public float currentCharge = 0f;
+            public float lastChargeSent = -1f; // Time.unscaledTime of the last MagicChargePacket
             public SpellCaster caster;
             public SpellCastCharge charge;
             public int casterId;
@@ -593,13 +594,24 @@ namespace AMP.Network.Client.NetworkComponents {
             new MagicSetPacket("", (byte) side, casterNetworkId, casterType).SendToServerReliable();
         }
 
+        // CheckForMagic runs every FixedUpdate: a changing charge was sent 50-90 times a second per hand. Now at most at the player tick rate,
+        // and always when the charge reaches full or empty, so the last value is never skipped (audit 8)
+        private static bool ChargeDue(CastingInfo info, float charge) {
+            float now = Time.unscaledTime;
+            if(charge >= 1f || charge <= 0f || now - info.lastChargeSent >= 1f / Mathf.Max(1, Config.PLAYER_TICK_RATE)) {
+                info.lastChargeSent = now;
+                return true;
+            }
+            return false;
+        }
+
         private void CheckForMagic() {
             if(currentActiveSpells.Count > 0) {
                 foreach(KeyValuePair<Side, CastingInfo> entry in currentActiveSpells) {
 
                     if(entry.Value.stopped) continue;
                     if(entry.Value.caster.mana.mergeActive) {
-                        if(entry.Value.currentCharge != entry.Value.caster.mana.mergeInstance.currentCharge) {
+                        if(entry.Value.currentCharge != entry.Value.caster.mana.mergeInstance.currentCharge && ChargeDue(entry.Value, entry.Value.caster.mana.mergeInstance.currentCharge)) {
                             new MagicChargePacket(byte.MaxValue, entry.Value.casterId, entry.Value.casterType, entry.Value.caster.mana.mergeInstance.currentCharge, entry.Value.caster.GetShootDirection()).SendToServerUnreliable();
 
                             entry.Value.currentCharge = entry.Value.caster.mana.mergeInstance.currentCharge;
@@ -611,7 +623,7 @@ namespace AMP.Network.Client.NetworkComponents {
                             OnSpellStopped(entry.Key);
                         });
                     } else if(entry.Value.charge != null) {
-                        if(entry.Value.currentCharge != entry.Value.charge.currentCharge) { // Charge changed
+                        if(entry.Value.currentCharge != entry.Value.charge.currentCharge && ChargeDue(entry.Value, entry.Value.charge.currentCharge)) { // Charge changed
                             new MagicChargePacket((byte) entry.Key, entry.Value.casterId, entry.Value.casterType, entry.Value.charge.currentCharge, entry.Value.caster.GetShootDirection()).SendToServerUnreliable();
 
                             entry.Value.currentCharge = entry.Value.charge.currentCharge;

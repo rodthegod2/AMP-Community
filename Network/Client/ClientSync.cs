@@ -303,9 +303,19 @@ namespace AMP.Network.Client {
         /// <summary>
         /// Checking if the player has any unsynched items that the server needs to know about
         /// </summary>
+        // Items of this level without a synced entry. One pass over the entries into a set instead of one pass per item: with a few hundred
+        // props that was tens of thousands of comparisons every sync cycle (audit finding 7, Quest)
+        private List<Item> UnsyncedItems() {
+            var synced = new HashSet<Item>();
+            foreach(ItemNetworkData ind in syncData.items.Values) {
+                if(!ReferenceEquals(ind.clientsideItem, null)) synced.Add(ind.clientsideItem);
+            }
+            return Item.allActive.Where(item => !synced.Contains(item)).ToList();
+        }
+
         internal IEnumerator CheckUnsynchedItems() {
             // Get all items that are not synched
-            List<Item> unsynced_items = Item.allActive.Where(item => syncData.items.All(entry => !item.Equals(entry.Value.clientsideItem))).ToList();
+            List<Item> unsynced_items = UnsyncedItems();
 
             //Log.Debug(unfoundItemMode);
             foreach(Item item in unsynced_items) {
@@ -411,7 +421,9 @@ namespace AMP.Network.Client {
 
         private IEnumerator TryRespawningPlayers() {
             foreach(PlayerNetworkData pnd in syncData.players.Values.ToList()) {
-                if(  (pnd.creature == null ||/* !pnd.creature.enabled ||*/ !pnd.creature.loaded || !pnd.creature.isCulled)
+                // (also "|| !isCulled" before: true for every visible player, so each cycle waited LONG_WAIT_DELAY per player for a
+                // TrySpawnPlayer that returns at once while the avatar exists)
+                if(  (pnd.creature == null ||/* !pnd.creature.enabled ||*/ !pnd.creature.loaded)
                   && !pnd.isSpawning
                   && pnd.receivedPos
                    ) {
@@ -762,7 +774,7 @@ namespace AMP.Network.Client {
             int i = 0;
 
             List<ItemNetworkData> known_items = syncData.items.Values.ToList();
-            List<Item> unsynced_items = Item.allActive.Where(item => syncData.items.All(entry => !item.Equals(entry.Value.clientsideItem))).ToList();
+            List<Item> unsynced_items = UnsyncedItems();
             foreach(Item item in unsynced_items) {
                 //float range = SyncFunc.getCloneDistance(item.itemId);
                 foreach(ItemNetworkData ind in known_items) {

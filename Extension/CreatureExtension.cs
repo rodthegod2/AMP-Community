@@ -162,31 +162,29 @@ namespace AMP.Extension {
         }
 
         internal static void ReadRagdoll(this Creature creature, out Vector3[] positions, out Quaternion[] rotations, out Vector3[] velocity, out Vector3[] angularVelocity, bool animJawBone = false) {
-            List<Vector3> vec3s = new List<Vector3>();
-            List<Quaternion> quats = new List<Quaternion>();
-            List<Vector3> vels = new List<Vector3>();
-            List<Vector3> aVels = new List<Vector3>();
+            // Runs several times per tick for every ragdolled creature: the arrays are sized once instead of growing lists plus copies
+            // (8 allocations per call before; audit finding 8, Quest GC)
+            List<RagdollPart> parts = creature.ragdoll.parts;
+            int count = 0;
+            for(int p = 0; p < parts.Count; p++) if(parts[p] != creature.ragdoll.rootPart) count++;
+            positions       = new Vector3[count];
+            rotations       = new Quaternion[count];
+            velocity        = new Vector3[count];
+            angularVelocity = new Vector3[count];
 
             Ragdoll.Bone jawBone = creature.ragdoll.GetBone(creature.jaw);
-            foreach(RagdollPart part in creature.ragdoll.parts) {
+            Vector3 origin = creature.transform.position;
+            int i = 0;
+            for(int p = 0; p < parts.Count; p++) {
+                RagdollPart part = parts[p];
                 if(part == creature.ragdoll.rootPart) continue;
 
-
-                vec3s.Add(part.transform.position - creature.transform.position);
-
-                if(animJawBone && part.bone == jawBone) {
-                    quats.Add(jawBone.animation.rotation);
-                } else {
-                    quats.Add(part.transform.rotation);
-                }
-
-                vels .Add(part.physicBody.velocity);
-                aVels.Add(part.physicBody.angularVelocity);
+                positions[i] = part.transform.position - origin;
+                rotations[i] = animJawBone && part.bone == jawBone ? jawBone.animation.rotation : part.transform.rotation;
+                velocity[i]        = part.physicBody.velocity;
+                angularVelocity[i] = part.physicBody.angularVelocity;
+                i++;
             }
-            positions       = vec3s.ToArray();
-            rotations       = quats.ToArray();
-            velocity        = vels.ToArray();
-            angularVelocity = aVels.ToArray();
         }
 
         internal static void ApplyRagdoll(this Creature creature, Vector3[] positions, Quaternion[] rotations) {

@@ -94,7 +94,7 @@ namespace AMP.Network.Packets.Implementation {
                     });
                 }
             }
-            return base.ProcessClient(client);
+            return true; // handled; false made Client.OnPacket queue every one of these (up to ~90/s per caster) for nothing (audit 12)
         }
 
         public override bool ProcessServer(NetamiteServer server, ClientData client) {
